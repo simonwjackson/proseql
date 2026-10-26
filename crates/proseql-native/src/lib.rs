@@ -1122,6 +1122,13 @@ impl NativeRuntime {
         } else {
             Ok(())
         };
+        if !poisoned && flush_result.is_ok() {
+            if let Some(sources) = &state.sources {
+                for lazy in sources.lazy.values() {
+                    lazy.stream.index.save(state.host.as_ref());
+                }
+            }
+        }
         let mut stop_result = Ok(());
         for handle in state.watch.drain(..) {
             if let Err(error) = handle.stop() {

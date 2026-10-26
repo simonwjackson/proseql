@@ -635,3 +635,69 @@ Native selects the engine's `owned-mutations` Cargo feature. Other hosts keep th
 existing borrowed CRUD decode path. Both paths use the same schema semantics;
 the feature avoids linking an additional owned decoder into the production
 WASM artifact. It does not change a source configuration or a wire contract.
+
+
+## Disposable index files
+
+Native `FsStorageHost` can write derived files under each lazy partitioned
+source's `<root>/.proseql-index/` directory. For `2025-05.jsonl` the files are
+`2025-05.jsonl.ids.idx`, `2025-05.jsonl.valid.idx`, and
+`2025-05.jsonl.time-<field-hash>.idx` for each used ordered field. Partition
+listings and managed filesystem watch notifications ignore this directory.
+WASM/browser and memory hosts do not persist indexes. Custom codecs, schemas
+with checks/default callbacks, and migration configurations keep the text path:
+closure implementations cannot be fingerprinted across processes.
+
+Text remains the only source of truth. Delete `.proseql-index` at any time,
+including while the runtime runs. Missing, unreadable, truncated, damaged,
+old-format, old-index-version or different-schema files are cache misses, never
+new database errors. Files can reappear on release or close. Orphan `*.tmp`
+files are ignored and can also be deleted. Cache files are not an interchange
+format or a substitute for text backups.
+
+The little-endian versioned envelope contains magic, format/index versions,
+relative text path, covered byte length, trusted change token and modification
+time, a checked prefix hash, schema/config fingerprint, payload length and a
+checksum over the entire envelope/payload. An unchanged trusted generation
+needs metadata checks, not a text read. A grown file needs one checked hash
+read per distinct covered prefix, shared across sidecar kinds, followed by
+suffix scanning. Edits, truncation, replacement or mismatched prefixes rebuild
+from text. Every restored source is checked again before publication. These
+checks retain the existing race window; they do not add locking or snapshots.
+
+ID sidecars contain hashes and exact file-local locations, never authoritative
+IDs or records. The merged locator still checks cross-partition duplicate IDs,
+including collisions verified against text. A stale or missing sidecar cannot
+make a duplicate create succeed. Reads still decode/validate candidate records.
+Validation records certify only the checked text generation under the saved
+schema/config fingerprint. Loading membership without a validation record does
+not bypass payload validation or validation-before-duplicate precedence.
+
+Time sidecars are eligible only after whole-file canonical validation succeeded
+under that fingerprint. A failed read disables pending time publication. A
+grown time sidecar requires canonical validation of its new suffix before
+seeking; failure falls back to the canonical full scan and its original error.
+Existing in-memory safe-seek semantics remain unchanged. Tests compare invalid
+original and appended payload errors with and without sidecars.
+
+Publication uses a unique `create_new` temporary file and a same-directory
+rename. There is deliberately no file or directory fsync for this derived data:
+losing it only costs rebuilding. A crash before rename leaves the old index or
+none; a power-loss-damaged file fails checksum/generation checks. Text append
+sync, read-back evidence, rollback and quarantine rules do not change.
+
+Writes are deferred to `release_streaming_indexes()` and successful `close()`,
+not performed per appended row or per query. Checked own-appends advance locator
+and validation coverage through the existing append evidence. A process that
+exits without release/close may lose recent index work, never text. Index writes
+and hashing can increase release/close latency. After loading a checked index,
+publication reuses its checked full-prefix hash when the token is unchanged.
+
+Disk cost: an ID payload is 24 bytes per row plus 24 bytes per file; a validation
+payload is empty. Each envelope adds 112 bytes plus the relative-path byte
+length. Time payloads use JSON scalar checkpoints inside the binary envelope,
+one checkpoint every 32 rows, so cost depends on key length and field count.
+The reader caps each individual sidecar at 64 MiB; larger indexes fall back to
+text. This caps corrupt-file allocation, not collection size. Checksums detect
+accidental damage, not a hostile writer forging cache files and checksums.
+[Round-4 measured sizes, latency, memory and remaining misses](benchmarks/query-while-scanning-persist-round4.md).

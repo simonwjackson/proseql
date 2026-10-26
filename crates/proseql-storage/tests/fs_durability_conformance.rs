@@ -289,6 +289,16 @@ impl DurableStorageHost for ReplaceOnly {
 }
 
 impl StorageHost for ReplaceOnly {
+    fn supports_indexes(&self) -> bool {
+        self.0.supports_indexes()
+    }
+    fn read_index(&self, path: &str) -> Option<Vec<u8>> {
+        self.0.read_index(path)
+    }
+    fn write_index_atomic(&self, path: &str, data: &[u8]) {
+        self.0.write_index_atomic(path, data);
+    }
+
     fn read(&self, path: &str) -> Result<String, EngineError> {
         self.0.read(path)
     }

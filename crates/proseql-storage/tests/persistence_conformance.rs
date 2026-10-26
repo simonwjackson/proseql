@@ -157,6 +157,16 @@ impl FailingAppendHost {
 }
 
 impl StorageHost for FailingAppendHost {
+    fn supports_indexes(&self) -> bool {
+        self.inner.supports_indexes()
+    }
+    fn read_index(&self, path: &str) -> Option<Vec<u8>> {
+        self.inner.read_index(path)
+    }
+    fn write_index_atomic(&self, path: &str, data: &[u8]) {
+        self.inner.write_index_atomic(path, data);
+    }
+
     fn read_range(&self, path: &str, offset: u64, len: usize) -> Result<Vec<u8>, EngineError> {
         self.inner.read_range(path, offset, len)
     }
@@ -236,6 +246,16 @@ impl StorageHost for FailingAppendHost {
 }
 
 impl StorageHost for CountingHost {
+    fn supports_indexes(&self) -> bool {
+        self.inner.supports_indexes()
+    }
+    fn read_index(&self, path: &str) -> Option<Vec<u8>> {
+        self.inner.read_index(path)
+    }
+    fn write_index_atomic(&self, path: &str, data: &[u8]) {
+        self.inner.write_index_atomic(path, data);
+    }
+
     fn read_range(&self, path: &str, offset: u64, len: usize) -> Result<Vec<u8>, EngineError> {
         self.inner.read_range(path, offset, len)
     }

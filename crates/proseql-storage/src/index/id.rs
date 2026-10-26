@@ -20,6 +20,8 @@ fn speculative_address(file: u32, offset: u64) -> Option<u64> {
         .then_some(WIDE_MARKER | SPECULATIVE_TAG | (u64::from(file) << 32) | offset)
 }
 
+type SavedEntries = (u64, u64, Vec<(u64, u64, u64)>);
+
 type RowVisitor<'a> = dyn FnMut(&str, &[u8], RowLocation, bool) -> Result<(), EngineError> + 'a;
 type DecodedRowVisitor<'a> =
     dyn FnMut(&str, &[u8], RowLocation, bool) -> Result<Option<Box<str>>, EngineError> + 'a;
@@ -116,7 +118,7 @@ pub fn id_error(path: &str, message: impl Into<String>) -> EngineError {
 
 impl IdLocator {
     pub fn build(host: &dyn StorageHost, paths: &[String]) -> Result<Self, EngineError> {
-        Self::build_internal(host, paths, &BTreeMap::new(), &mut None)
+        Self::build_internal(host, paths, &BTreeMap::new(), &mut None, None)
     }
     pub fn build_visiting(
         host: &dyn StorageHost,
@@ -141,7 +143,7 @@ impl IdLocator {
         observed: &BTreeMap<String, Option<SourceGeneration>>,
         visit: &mut DecodedRowVisitor<'_>,
     ) -> Result<Self, EngineError> {
-        Self::build_internal(host, paths, observed, &mut Some(visit))
+        Self::build_internal(host, paths, observed, &mut Some(visit), None)
     }
 
     fn build_internal(
@@ -149,6 +151,7 @@ impl IdLocator {
         paths: &[String],
         observed: &BTreeMap<String, Option<SourceGeneration>>,
         visit: &mut Option<&mut DecodedRowVisitor<'_>>,
+        store: Option<&super::persist::Store>,
     ) -> Result<Self, EngineError> {
         let _build = crate::diagnostics::span("streaming_id_locator_build");
         let mut locator = Self::default();
@@ -166,11 +169,120 @@ impl IdLocator {
                 Some(generation) => generation.clone(),
                 None => SourceGeneration::observe(host, path)?,
             };
-            locator.scan_file(host, file, (0, 0), generation, false, visit)?;
+            let loaded = generation
+                .as_ref()
+                .and_then(|current| store.and_then(|store| store.load(host, current, "ids")));
+            let mut position = (0, 0);
+            if let Some(loaded) = loaded {
+                if let Some((rows, resume, entries)) =
+                    Self::decode_entries(&loaded.payload, loaded.generation.covered_len)
+                {
+                    for (hash, offset, ordinal) in entries {
+                        let mut entry = locator.make_entry(
+                            file,
+                            "",
+                            RowLocation {
+                                partition: file,
+                                offset,
+                                ordinal,
+                            },
+                        );
+                        entry.hash = hash;
+                        locator.entries.push(entry);
+                    }
+                    locator.files[file as usize] = File {
+                        path: path.clone(),
+                        generation: generation.clone(),
+                        rows,
+                        resume,
+                        dirty: false,
+                    };
+                    if loaded.unchanged {
+                        continue;
+                    }
+                    if resume == loaded.generation.covered_len {
+                        position = (resume, rows);
+                    } else {
+                        locator.remove_suffix(file, 0);
+                    }
+                }
+            }
+            locator.scan_file(host, file, position, generation, false, visit)?;
         }
         locator.finish(host)?;
         Ok(locator)
     }
+    /// Restore per-file membership only after checking the source generation.
+    pub fn build_persisted(
+        host: &dyn StorageHost,
+        paths: &[String],
+        observed: &BTreeMap<String, Option<SourceGeneration>>,
+        mut visit: Option<&mut DecodedRowVisitor<'_>>,
+        store: &super::persist::Store,
+    ) -> Result<Self, EngineError> {
+        Self::build_internal(host, paths, observed, &mut visit, Some(store))
+    }
+
+    fn decode_entries(mut bytes: &[u8], len: u64) -> Option<SavedEntries> {
+        use super::persist::take;
+        let rows = take(&mut bytes)?;
+        let resume = take(&mut bytes)?;
+        let count = usize::try_from(take(&mut bytes)?).ok()?;
+        if resume > len
+            || count != bytes.len() / 24
+            || !bytes.len().is_multiple_of(24)
+            || count as u64 != rows
+        {
+            return None;
+        }
+        let mut entries = Vec::with_capacity(count);
+        for _ in 0..count {
+            let hash = take(&mut bytes)?;
+            let offset = take(&mut bytes)?;
+            let ordinal = take(&mut bytes)?;
+            if offset >= len || ordinal >= rows {
+                return None;
+            }
+            entries.push((hash, offset, ordinal));
+        }
+        Some((rows, resume, entries))
+    }
+
+    pub fn save(&self, host: &dyn StorageHost, store: &super::persist::Store) {
+        use super::persist::put;
+        if self.partitioned || !host.supports_indexes() {
+            return;
+        }
+        let mut payloads = self
+            .files
+            .iter()
+            .map(|file| {
+                let mut out = Vec::new();
+                put(&mut out, file.rows);
+                put(&mut out, file.resume);
+                put(&mut out, file.rows);
+                out
+            })
+            .collect::<Vec<_>>();
+        for entry in self.entries.iter().chain(&self.delta) {
+            let pos = location(entry, &self.wide);
+            if pos.row == super::UNKNOWN_ORDINAL {
+                return;
+            }
+            let out = &mut payloads[pos.file as usize];
+            put(out, entry.hash);
+            put(out, pos.offset);
+            put(out, pos.row);
+        }
+        for (file, payload) in self.files.iter().zip(payloads) {
+            if !file.dirty {
+                if let Some(generation) = &file.generation {
+                    store.save(host, generation, "ids", &payload);
+                }
+            }
+        }
+    }
+
     fn entry(&mut self, file: u32, id: &str, row: RowLocation) {
         let entry = self.make_entry(file, id, row);
         if self.entries.len() == self.entries.capacity() {
@@ -402,7 +514,7 @@ impl IdLocator {
         }
         // Do not merge an append delta unless a file actually needs rescanning.
         if !self.files.iter().map(|file| &file.path).eq(paths.iter()) {
-            *self = Self::build_internal(host, paths, observed, visit)?;
+            *self = Self::build_internal(host, paths, observed, visit, None)?;
             return Ok(());
         }
         let mut changed = false;

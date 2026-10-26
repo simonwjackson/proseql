@@ -6,6 +6,7 @@ use proseql_engine::scan::RowLocation;
 use proseql_formats::FormatRegistry;
 use proseql_storage::generation::{GenerationCheck, SourceGeneration};
 use proseql_storage::host::StorageHost;
+use proseql_storage::index::persist::Store;
 use proseql_storage::index::{rows, IdLocator, TimeIndex, UNKNOWN_OFFSET};
 use proseql_storage::persistence::CollectionStorageConfig;
 use proseql_storage::source_config::{
@@ -84,10 +85,12 @@ pub(crate) struct AppendProof {
 #[derive(Default)]
 pub(crate) struct IndexState {
     times: BTreeMap<(String, String), TimeIndex>,
+    time_validated: BTreeMap<(String, String), SourceGeneration>,
     ids: Option<IdLocator>,
     validated: BTreeMap<String, SourceGeneration>,
     codec: Option<CodecContext>,
     append_proofs: BTreeMap<String, AppendProof>,
+    store: Option<Store>,
 }
 
 impl IndexState {
@@ -95,8 +98,28 @@ impl IndexState {
     /// generations) after the sources changed, but keep the codec context
     /// configured at runtime assembly. Use this instead of replacing the
     /// state with `Default::default()`, which would lose that context.
+    pub(crate) fn save(&self, host: &dyn StorageHost) {
+        if let Some(store) = &self.store {
+            if let Some(ids) = &self.ids {
+                ids.save(host, store);
+            }
+            for generation in self.validated.values() {
+                store.save(host, generation, "valid", &[]);
+            }
+            for (key, index) in &self.times {
+                if self.time_validated.get(key) == index.generation() {
+                    index.save(host, store);
+                }
+            }
+        }
+    }
+
     pub fn invalidate(&mut self) {
+        if let Some(store) = &self.store {
+            store.clear();
+        }
         self.times.clear();
+        self.time_validated.clear();
         self.ids = None;
         self.validated.clear();
         self.append_proofs.clear();
@@ -113,6 +136,41 @@ impl IndexState {
             return Ok(None);
         }
         let key = (path.to_owned(), field.to_owned());
+        if !self.times.contains_key(&key) {
+            if let (Some(store), Some(codec)) = (&self.store, &self.codec) {
+                let file = proseql_storage::partitioned::file_source(&codec.source, path);
+                let decoder = RowDecoder {
+                    collection: &codec.collection,
+                    storage: &codec.storage,
+                    source: &codec.source,
+                    callbacks: &codec.callbacks,
+                };
+                let mut validate = |bytes: &[u8], final_line: bool| {
+                    let mut terminated = Vec::new();
+                    let bytes = if final_line {
+                        bytes
+                    } else {
+                        terminated.extend_from_slice(bytes);
+                        terminated.push(b'\n');
+                        &terminated
+                    };
+                    decoder
+                        .decode_row(host, &codec.formats, &file, bytes)
+                        .map(|_| ())
+                };
+                if let Some(index) = TimeIndex::load_validating(
+                    host,
+                    store,
+                    &observed,
+                    field,
+                    32,
+                    Some(&mut validate),
+                ) {
+                    self.time_validated.insert(key.clone(), observed.clone());
+                    self.times.insert(key.clone(), index);
+                }
+            }
+        }
         let proof = self.append_proof(path).cloned();
         let mut clear_proof = false;
         if let Some(index) = self.times.get_mut(&key) {
@@ -125,6 +183,9 @@ impl IndexState {
                         &proof.after,
                         proof.start,
                     )? {
+                        if self.time_validated.get(&key) == Some(&proof.before) {
+                            self.time_validated.insert(key.clone(), proof.after.clone());
+                        }
                         return Ok(());
                     }
                 }
@@ -168,7 +229,15 @@ impl IndexState {
     }
 
     pub(crate) fn publish_time_index(&mut self, path: &str, field: &str, index: TimeIndex) {
+        if let Some(generation) = index.generation() {
+            self.time_validated
+                .insert((path.into(), field.into()), generation.clone());
+        }
         self.times.insert((path.into(), field.into()), index);
+    }
+
+    pub(crate) fn scan_failed(&mut self) {
+        self.time_validated.clear();
     }
 
     pub fn id_locator(
@@ -184,7 +253,12 @@ impl IndexState {
         let refreshed = if let Some(locator) = self.ids.as_mut() {
             locator.refresh(host, paths)
         } else {
-            IdLocator::build(host, paths).map(|locator| self.ids = Some(locator))
+            (if let Some(store) = &self.store {
+                IdLocator::build_persisted(host, paths, &PathObservations::new(), None, store)
+            } else {
+                IdLocator::build(host, paths)
+            })
+            .map(|locator| self.ids = Some(locator))
         };
         if let Err(error) = refreshed {
             self.append_proofs.clear();
@@ -234,9 +308,11 @@ impl IndexState {
             } else if let Some(locator) = self.ids.as_mut() {
                 locator.refresh_observed_decoded(host, paths, observed, visit)?;
             } else {
-                self.ids = Some(IdLocator::build_observed_decoded(
-                    host, paths, observed, visit,
-                )?);
+                self.ids = Some(if let Some(store) = &self.store {
+                    IdLocator::build_persisted(host, paths, observed, Some(visit), store)?
+                } else {
+                    IdLocator::build_observed_decoded(host, paths, observed, visit)?
+                });
             }
             Ok(())
         })();
@@ -304,6 +380,9 @@ impl IndexState {
             return Ok(());
         }
         if let Some(before) = before {
+            if self.validated.get(&path) == Some(&before) {
+                self.validated.insert(path.clone(), generation.clone());
+            }
             let proof = AppendProof {
                 before,
                 after: generation,
@@ -488,10 +567,33 @@ fn lookup(
     // separate pass. Changed observations conservatively validate whole files.
     let validation = proseql_storage::diagnostics::span("streaming_id_validation");
     let mut needed = BTreeMap::new();
+    let mut validation_start = BTreeMap::new();
     let mut observed = PathObservations::new();
     for path in &paths {
-        let previous = sources.lazy[collection].stream.index.validated.get(path);
         let generation = SourceGeneration::observe_stat(host, path, listed_stats[path])?;
+        let index = &mut sources.lazy.get_mut(collection).expect("lazy").stream.index;
+        if !index.validated.contains_key(path) {
+            if let Some(loaded) = index
+                .store
+                .as_ref()
+                .and_then(|store| store.load(host, &generation, "valid"))
+            {
+                if loaded.payload.is_empty() {
+                    if loaded.unchanged {
+                        index.validated.insert(path.clone(), generation.clone());
+                    } else if loaded.generation.covered_len > 0
+                        && host
+                            .read_range(path, loaded.generation.covered_len - 1, 1)
+                            .ok()
+                            .as_deref()
+                            == Some(b"\n")
+                    {
+                        validation_start.insert(path.clone(), loaded.generation.covered_len);
+                    }
+                }
+            }
+        }
+        let previous = sources.lazy[collection].stream.index.validated.get(path);
         observed.insert(path.clone(), Some(generation.clone()));
         if previous != Some(&generation) {
             // A changed observation is not evidence of an append-only prefix.
@@ -589,7 +691,7 @@ fn lookup(
             rows::visit_lines(
                 host,
                 path,
-                0,
+                *validation_start.get(path).unwrap_or(&0),
                 generation.covered_len,
                 0,
                 |bytes, _, final_line| validate_line(path, bytes, final_line).map(|_| ()),
@@ -599,7 +701,10 @@ fn lookup(
     let mut visited = BTreeMap::<String, u64>::new();
     let candidates = {
         let mut visit = |path: &str, bytes: &[u8], location: RowLocation, final_line: bool| {
-            if !prevalidated && needed.contains_key(path) {
+            if !prevalidated
+                && needed.contains_key(path)
+                && location.offset >= *validation_start.get(path).unwrap_or(&0)
+            {
                 let id = validate_line(path, bytes, final_line)?;
                 visited.entry(path.into()).or_insert(location.offset);
                 return Ok(id);
@@ -617,12 +722,13 @@ fn lookup(
             .map_err(|error| contextualize(error, &source))?
     };
     for (path, generation) in &needed {
-        let covered = prevalidated || visited.get(path) == Some(&0);
+        let covered =
+            prevalidated || visited.get(path) == Some(validation_start.get(path).unwrap_or(&0));
         if !covered {
             rows::visit_lines(
                 host,
                 path,
-                0,
+                *validation_start.get(path).unwrap_or(&0),
                 generation.covered_len,
                 0,
                 |bytes, _, final_line| validate_line(path, bytes, final_line).map(|_| ()),
@@ -670,6 +776,45 @@ pub(crate) fn configure_streaming_index(
         let config = sources.config.collection_configs[collection].clone();
         let mut storage = config.clone();
         storage.schema = crate::schema_checks::storage_decode_schema(&config.schema);
+        let fingerprint_bytes = serde_json::to_vec(&(
+            &config.schema,
+            &config.id_strategy,
+            &config.version,
+            format!("{:?}", &config.migrations),
+            format!(
+                "{:?}",
+                (
+                    &lazy.source.id,
+                    &lazy.source.collection,
+                    &lazy.source.format,
+                    &lazy.source.partition_by,
+                    &lazy.source.prose
+                )
+            ),
+        ))
+        .unwrap_or_default();
+        fn callback_free(schema: &proseql_engine::descriptor::SchemaNode) -> bool {
+            use proseql_engine::descriptor::SchemaNode;
+            match schema {
+                SchemaNode::Checked { .. } | SchemaNode::OptionalWithDefault { .. } => false,
+                SchemaNode::Struct { fields } => {
+                    fields.iter().all(|field| callback_free(&field.schema))
+                }
+                SchemaNode::Array { item }
+                | SchemaNode::Optional(item)
+                | SchemaNode::NullOr(item) => callback_free(item),
+                SchemaNode::Record { key, value } => callback_free(key) && callback_free(value),
+                _ => true,
+            }
+        }
+        let callback_free = callback_free(&config.schema) && config.migrations.is_empty();
+        lazy.stream.index.store =
+            (formats.borrowed_jsonl_compatible(&lazy.source.format) && callback_free).then(|| {
+                Store::new(
+                    lazy.source.root.clone(),
+                    proseql_storage::index::persist::checksum(&fingerprint_bytes),
+                )
+            });
         lazy.stream.index.codec = Some(CodecContext {
             positional: formats.borrowed_jsonl_compatible(&lazy.source.format),
             formats: Arc::clone(formats),
@@ -684,13 +829,15 @@ pub(crate) fn configure_streaming_index(
 impl NativeRuntime {
     /// Release derived indexes for streaming lazy collections, keeping their
     /// codec context. Call when idle to trade retained metadata for the next
-    /// operation's rebuild cost (about 360 ms for 656k IDs on aka, plus payload
-    /// validation for ID reads). Results and durable source files do not change.
+    /// operation's checked sidecar load or text rebuild cost. Publishes eligible
+    /// disposable sidecars first. Results and durable source files do not change.
     /// This drops allocations; it does not promise allocator RSS reclamation.
     pub fn release_streaming_indexes(&self) -> Result<(), EngineError> {
         let mut state = self.lock_open()?;
+        let state = &mut *state;
         if let Some(sources) = state.sources.as_mut() {
             for lazy in sources.lazy.values_mut() {
+                lazy.stream.index.save(state.host.as_ref());
                 lazy.stream.index.invalidate();
             }
         }

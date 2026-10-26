@@ -35,7 +35,117 @@ fn compare(a: &Value, b: &Value) -> Option<Ordering> {
     }
 }
 
+type SuffixValidator<'a> = dyn FnMut(&[u8], bool) -> Result<(), EngineError> + 'a;
+
 impl TimeIndex {
+    pub fn save(&self, host: &dyn StorageHost, store: &super::persist::Store) {
+        let Some(generation) = &self.generation else {
+            return;
+        };
+        let entries = self
+            .entries
+            .iter()
+            .map(|e| (&e.key, e.offset, e.row))
+            .collect::<Vec<_>>();
+        if let Ok(payload) = serde_json::to_vec(&(
+            &self.field,
+            self.stride,
+            entries,
+            &self.last,
+            self.rows,
+            self.resume,
+            self.ordered,
+        )) {
+            store.save(
+                host,
+                generation,
+                &format!(
+                    "time-{:016x}",
+                    super::persist::checksum(self.field.as_bytes())
+                ),
+                &payload,
+            );
+        }
+    }
+    pub fn load(
+        host: &dyn StorageHost,
+        store: &super::persist::Store,
+        current: &SourceGeneration,
+        field: &str,
+        stride: usize,
+    ) -> Option<Self> {
+        Self::load_validating(host, store, current, field, stride, None)
+    }
+
+    /// A grown prefix needs canonical validation before its new keys can seek.
+    pub fn load_validating(
+        host: &dyn StorageHost,
+        store: &super::persist::Store,
+        current: &SourceGeneration,
+        field: &str,
+        stride: usize,
+        mut validate: Option<&mut SuffixValidator<'_>>,
+    ) -> Option<Self> {
+        let loaded = store.load(
+            host,
+            current,
+            &format!("time-{:016x}", super::persist::checksum(field.as_bytes())),
+        )?;
+        type Payload = (
+            String,
+            usize,
+            Vec<(Value, u64, u64)>,
+            Option<Value>,
+            u64,
+            u64,
+            bool,
+        );
+        let (saved_field, saved_stride, entries, last, rows, resume, ordered): Payload =
+            serde_json::from_slice(&loaded.payload).ok()?;
+        if saved_field != field
+            || saved_stride != stride
+            || resume > loaded.generation.covered_len
+            || entries
+                .iter()
+                .any(|(_, offset, row)| *offset >= loaded.generation.covered_len || *row >= rows)
+        {
+            return None;
+        }
+        let mut index = Self {
+            path: current.path.clone(),
+            field: saved_field,
+            stride,
+            entries: entries
+                .into_iter()
+                .map(|(key, offset, row)| Checkpoint { key, offset, row })
+                .collect(),
+            last,
+            rows,
+            resume,
+            ordered,
+            generation: Some(current.clone()),
+        };
+        if !loaded.unchanged {
+            if resume != loaded.generation.covered_len {
+                return None;
+            }
+            let validate = validate.as_mut()?;
+            rows::visit_lines(
+                host,
+                &current.path,
+                resume,
+                current.covered_len,
+                rows,
+                |bytes, _, final_line| validate(bytes, final_line),
+            )
+            .ok()?;
+            index
+                .extend(host, &current.path, resume, Some(current.clone()))
+                .ok()?;
+        }
+        Some(index)
+    }
+
     /// Start an unpublished index to fill during the caller's canonical scan.
     pub fn begin(
         host: &dyn StorageHost,

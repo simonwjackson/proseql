@@ -27,7 +27,7 @@
 **prose** /prōz/ *n.* — written language in its ordinary form.
 **SQL** /ˈsiːkwəl/ *n.* — the language of relational databases.
 
-A Rust-first, type-safe relational database that persists to plain text files. Rust is the only database engine. No server. No binary blobs. Just files you can read, edit, `git diff`, and actually understand.
+No server. No binary source of truth. Your data stays in files you can read, edit, `git diff`, and actually understand. ProseQL may keep disposable index files next to them; they are checked against the text, safe to delete, and never change an answer.
 
 ```
 your-project/

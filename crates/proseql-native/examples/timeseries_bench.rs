@@ -1196,6 +1196,16 @@ impl CountingHost {
 }
 
 impl StorageHost for CountingHost {
+    fn supports_indexes(&self) -> bool {
+        self.inner.supports_indexes()
+    }
+    fn read_index(&self, path: &str) -> Option<Vec<u8>> {
+        self.inner.read_index(path)
+    }
+    fn write_index_atomic(&self, path: &str, data: &[u8]) {
+        self.inner.write_index_atomic(path, data);
+    }
+
     fn read(&self, path: &str) -> Result<String, EngineError> {
         let content = self.inner.read(path)?;
         self.bytes_read

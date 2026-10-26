@@ -247,6 +247,16 @@ impl DurableStorageHost for CountingHost {
 }
 
 impl StorageHost for CountingHost {
+    fn supports_indexes(&self) -> bool {
+        self.fs.supports_indexes()
+    }
+    fn read_index(&self, path: &str) -> Option<Vec<u8>> {
+        self.fs.read_index(path)
+    }
+    fn write_index_atomic(&self, path: &str, data: &[u8]) {
+        self.fs.write_index_atomic(path, data);
+    }
+
     fn read(&self, path: &str) -> Result<String, EngineError> {
         *self
             .io

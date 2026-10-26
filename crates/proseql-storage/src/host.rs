@@ -56,6 +56,15 @@ pub struct FileStat {
 }
 
 pub trait StorageHost: Send + Sync {
+    /// Optional disposable index I/O. Failures must remain cache misses.
+    fn supports_indexes(&self) -> bool {
+        false
+    }
+    fn read_index(&self, _path: &str) -> Option<Vec<u8>> {
+        None
+    }
+    fn write_index_atomic(&self, _path: &str, _data: &[u8]) {}
+
     fn read(&self, path: &str) -> Result<String, EngineError>;
     /// Read a file's raw bytes. Append-only JSONL loading uses it so that an
     /// interrupted final line that ends inside a UTF-8 sequence can still be

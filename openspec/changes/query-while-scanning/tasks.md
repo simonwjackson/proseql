@@ -48,7 +48,9 @@ The parent explicitly authorized the fresh complete final-source run above.
 
 ## Conditional level 2 (#18)
 
-- [ ] Start only with separate approval if measured misses justify it. No binary on-disk cache or column artifact is implemented by this change.
+- [x] User approved disposable binary indexes checked against text generations, safe to delete, with identical answers. README now says "No binary source of truth".
+- [x] Round 4 implements Fs-only per-file ID locators, schema-bound validated generations and per-ordered-field time indexes. Corrupt/stale/version/schema mismatches fall back to text. No column cache is implemented.
+- [ ] SQLite latency targets and independent review remain open; see the round-4 persistence report. No target is lowered.
 
 ## Round-2 cutover open items (#19 / #21)
 
@@ -56,5 +58,5 @@ The parent explicitly authorized the fresh complete final-source run above.
 - [x] Document one lazy model, deprecated selector, ignored max_loaded_partitions, empty status, eager-only read and the 13 guarantees plus approved round-2 additions.
 - [x] Give consumers the final tested SHA: `56e994370d6919ef4e3effa735381ab4b17fe0f0`; complete evidence is in `bench/acceptance/results/cutover-round2.md`.
 - [ ] Adopt that pin in real consumer manifests and deploy separately; no real consumer repository was edited here.
-- [ ] Resolve #20 latency/retained-memory misses separately; no target reduction or binary cache approval.
+- [ ] Resolve #20 latency/retained-memory misses separately; no target reduction. Disposable index policy approved in round 4; column-cache work remains separate.
 - [ ] Real-shape/Celeron/rakku measurements remain excluded by user rule, not qualified here.

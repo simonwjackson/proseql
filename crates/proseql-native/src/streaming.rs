@@ -93,303 +93,101 @@ impl NativeRuntime {
         if !applies {
             return None;
         }
-        Some((|| {
-            use proseql_engine::query::indexes::IndexUsed;
-            use proseql_engine::scan::executor::{Executor, ScanOutput, ScanRequest};
-            let filter = match &request {
-                ReadRequest::Query { input, .. }
-                | ReadRequest::QueryWithStats { input, .. }
-                | ReadRequest::Cursor { input, .. } => input.r#where.as_ref(),
-                ReadRequest::Aggregate { filter, .. } | ReadRequest::Grouped { filter, .. } => {
-                    *filter
-                }
-            };
-            let indexed = match &request {
-                ReadRequest::Query { populate, .. }
-                | ReadRequest::QueryWithStats { populate, .. }
-                | ReadRequest::Cursor { populate, .. } => populate.is_none(),
-                _ => true,
-            };
-            let scan_request = match &request {
-                ReadRequest::Query { input, .. } | ReadRequest::QueryWithStats { input, .. } => {
-                    ScanRequest::Query(input, None)
-                }
-                ReadRequest::Cursor { input, cursor, .. } => {
-                    ScanRequest::Query(input, Some(cursor))
-                }
-                ReadRequest::Aggregate { filter, config } => {
-                    ScanRequest::Aggregate(*filter, config)
-                }
-                ReadRequest::Grouped {
-                    filter,
-                    group_by,
-                    config,
-                } => ScanRequest::Grouped(*filter, group_by, config),
-            };
-            let sources = state.sources.as_ref().expect("streaming source");
-            let (_, paths) = sources.lazy_scope(collection, filter, "query")?;
-            let lazy = &sources.lazy[collection];
-            let source = lazy.source.clone();
-            let config = sources.config.collection_configs[collection].clone();
-            let mut decode_config = config.clone();
-            decode_config.schema = crate::schema_checks::storage_decode_schema(&config.schema);
-            let callbacks = std::sync::Arc::clone(&sources.callbacks);
-            let records = state
-                .database
-                .collection(collection)
-                .expect("lazy collection");
-            let mut executor = Executor::new(
-                records,
-                std::sync::Arc::clone(&callbacks),
-                scan_request,
-                indexed,
-            )?;
-            let descriptor = records.descriptor.clone();
-            let builtin = state.formats.borrowed_jsonl_compatible(&source.format);
-            let prepared_decoder =
-                proseql_engine::scan::decoder::SimpleDecoder::new(&config.schema);
-            let seek = if builtin {
-                range_bounds(&descriptor, filter)
-            } else {
-                None
-            };
-            let host = std::sync::Arc::clone(&state.host);
-            let formats = std::sync::Arc::clone(&state.formats);
-            let mut stats = BoundedQueryStats {
-                partitions_visited: paths.len(),
-                partitions_read: 0,
-                partitions_resident: 0,
-                pinned_partitions: 0,
-                retained_partition_limit: 0,
-                candidate_rows: 0,
-            };
-            let mut index_used = IndexUsed::None;
-            let mut identities = IdArena::default();
-            let mut ordinal = 0;
-            for (partition, path) in paths.iter().enumerate() {
-                let file_seek = seek.filter(|(field, lower, upper)| {
-                    !covers_partition(&source, path, field, *lower, *upper)
-                });
-                let observed = if file_seek.is_some() {
-                    let Some(stat) = host.stat(path)? else {
-                        continue;
-                    };
-                    proseql_storage::generation::SourceGeneration::observe_stat(
-                        host.as_ref(),
-                        path,
-                        stat,
-                    )
-                    .ok()
-                } else {
-                    if !host.exists(path)? {
-                        continue;
+        let result =
+            Some((|| {
+                use proseql_engine::query::indexes::IndexUsed;
+                use proseql_engine::scan::executor::{Executor, ScanOutput, ScanRequest};
+                let filter = match &request {
+                    ReadRequest::Query { input, .. }
+                    | ReadRequest::QueryWithStats { input, .. }
+                    | ReadRequest::Cursor { input, .. } => input.r#where.as_ref(),
+                    ReadRequest::Aggregate { filter, .. } | ReadRequest::Grouped { filter, .. } => {
+                        *filter
                     }
-                    None
                 };
-                let range = match file_seek.zip(observed.as_ref()) {
-                    Some(((field, lower, upper), observed)) => state
-                        .sources
-                        .as_mut()
-                        .expect("source")
-                        .lazy
-                        .get_mut(collection)
-                        .expect("lazy")
-                        .stream
-                        .index
-                        // An optional index is not the error authority. If
-                        // building/refreshing it fails, scan canonically so
-                        // parse/ID/schema error precedence stays unchanged.
-                        .time_index(host.as_ref(), path, field, observed.clone())
-                        .ok()
-                        .flatten()
-                        .and_then(|index| index.seek(lower, upper)),
-                    None => None,
+                let indexed = match &request {
+                    ReadRequest::Query { populate, .. }
+                    | ReadRequest::QueryWithStats { populate, .. }
+                    | ReadRequest::Cursor { populate, .. } => populate.is_none(),
+                    _ => true,
                 };
-                let mut pending_index = if let Some(((field, _, _), observed)) =
-                    file_seek.filter(|_| range.is_none()).zip(observed)
-                {
-                    state.sources.as_ref().expect("source").lazy[collection]
-                        .stream
-                        .index
-                        .begin_time_index(path, field, observed)
-                        .ok()
-                        .flatten()
+                let scan_request = match &request {
+                    ReadRequest::Query { input, .. }
+                    | ReadRequest::QueryWithStats { input, .. } => ScanRequest::Query(input, None),
+                    ReadRequest::Cursor { input, cursor, .. } => {
+                        ScanRequest::Query(input, Some(cursor))
+                    }
+                    ReadRequest::Aggregate { filter, config } => {
+                        ScanRequest::Aggregate(*filter, config)
+                    }
+                    ReadRequest::Grouped {
+                        filter,
+                        group_by,
+                        config,
+                    } => ScanRequest::Grouped(*filter, group_by, config),
+                };
+                let sources = state.sources.as_ref().expect("streaming source");
+                let (_, paths) = sources.lazy_scope(collection, filter, "query")?;
+                let lazy = &sources.lazy[collection];
+                let source = lazy.source.clone();
+                let config = sources.config.collection_configs[collection].clone();
+                let mut decode_config = config.clone();
+                decode_config.schema = crate::schema_checks::storage_decode_schema(&config.schema);
+                let callbacks = std::sync::Arc::clone(&sources.callbacks);
+                let records = state
+                    .database
+                    .collection(collection)
+                    .expect("lazy collection");
+                let mut executor = Executor::new(
+                    records,
+                    std::sync::Arc::clone(&callbacks),
+                    scan_request,
+                    indexed,
+                )?;
+                let descriptor = records.descriptor.clone();
+                let builtin = state.formats.borrowed_jsonl_compatible(&source.format);
+                let prepared_decoder =
+                    proseql_engine::scan::decoder::SimpleDecoder::new(&config.schema);
+                let seek = if builtin {
+                    range_bounds(&descriptor, filter)
                 } else {
                     None
                 };
-                if let Some(range) = range {
-                    index_used = IndexUsed::Ordered;
-                    if range
-                        .end_offset
-                        .is_some_and(|end| range.start_offset >= end)
-                    {
-                        continue;
-                    }
-                }
-                let identity_start = identities.entries.len();
-                identities.scopes.push((partition, range));
-                stats.partitions_read += 1;
-                let file = proseql_storage::partitioned::file_source(&source, path);
-                let partition_result = if !builtin {
-                    (|| {
-                        // Custom codecs retain their whole-document decode contract.
-                        // One partition's records coexist with query workspace;
-                        // positional indexes cannot interpret these custom rows.
-                        let raw = host.read_bytes(path)?;
-                        let mut loaded = proseql_storage::append::decode_append_bytes(
+                let host = std::sync::Arc::clone(&state.host);
+                let formats = std::sync::Arc::clone(&state.formats);
+                let mut stats = BoundedQueryStats {
+                    partitions_visited: paths.len(),
+                    partitions_read: 0,
+                    partitions_resident: 0,
+                    pinned_partitions: 0,
+                    retained_partition_limit: 0,
+                    candidate_rows: 0,
+                };
+                let mut index_used = IndexUsed::None;
+                let mut identities = IdArena::default();
+                let mut ordinal = 0;
+                for (partition, path) in paths.iter().enumerate() {
+                    let file_seek = seek.filter(|(field, lower, upper)| {
+                        !covers_partition(&source, path, field, *lower, *upper)
+                    });
+                    let observed = if file_seek.is_some() {
+                        let Some(stat) = host.stat(path)? else {
+                            continue;
+                        };
+                        proseql_storage::generation::SourceGeneration::observe_stat(
                             host.as_ref(),
-                            &formats,
-                            &file,
-                            &decode_config,
-                            &raw,
-                            true,
-                        )?;
-                        crate::schema_checks::decode_loaded_records(
-                            &config.schema,
-                            &config.id_strategy,
-                            &mut loaded.records,
-                            &callbacks,
-                        )?;
-                        for (id, row) in &loaded.records {
-                            proseql_storage::partitioned::check_partition_record(
-                                &source, path, id, row,
-                            )?;
+                            path,
+                            stat,
+                        )
+                        .ok()
+                    } else {
+                        if !host.exists(path)? {
+                            continue;
                         }
-                        for row in loaded.records.values() {
-                            validate_row(&config.schema, row, &callbacks)?;
-                        }
-                        for (index, (id, row)) in loaded.records.iter().enumerate() {
-                            identities.push(id, partition, index as u64);
-                            executor.push(row, ordinal);
-                            ordinal += 1;
-                        }
-                        if let Some(torn) = loaded.torn {
-                            let sources = state.sources.as_mut().expect("source");
-                            sources.torn.retain(|old| old.path != *path);
-                            sources.torn.push(torn);
-                        }
-                        Ok(())
-                    })()
-                } else {
-                    let expected_key =
-                        proseql_storage::partition_prune::partition_key_of_path(&source, path);
-                    read_rows(
-                        host.as_ref(),
-                        path,
-                        range,
-                        |bytes, final_unterminated, _line, offset| {
-                            use proseql_engine::scan::borrowed::BorrowedValue;
-                            let parsed = match &prepared_decoder {
-                                Some(decoder) => decoder
-                                    .decode_positioned(bytes)
-                                    .ok()
-                                    .flatten()
-                                    .map(|(row, present)| (row, Some(present)))
-                                    // A canonical payload fallback can still
-                                    // provide an eligible untransformed key.
-                                    .or_else(|| {
-                                        serde_json::from_slice::<BorrowedValue<'_>>(bytes)
-                                            .ok()
-                                            .map(|row| (row, None))
-                                    }),
-                                None => serde_json::from_slice::<BorrowedValue<'_>>(bytes)
-                                    .ok()
-                                    .map(|row| (row, None)),
-                            };
-                            if let Some((mut borrowed, decoded)) = parsed {
-                                if let Some(index) = pending_index.as_mut() {
-                                    let field = file_seek.expect("index field").0;
-                                    index.push_key(
-                                        borrowed
-                                            .get(field)
-                                            .map_or(Value::Null, BorrowedValue::to_owned),
-                                        offset,
-                                        final_unterminated,
-                                    );
-                                }
-                                if matches!(
-                                    config.id_strategy,
-                                    proseql_engine::descriptor::IdStrategy::Provided
-                                ) && (decoded.is_some()
-                                    || borrowed.decode_simple(&config.schema))
-                                    && borrowed
-                                        .get("id")
-                                        .and_then(BorrowedValue::as_str)
-                                        .is_some_and(|id| !id.is_empty())
-                                    && borrowed_partition_matches(
-                                        &source,
-                                        expected_key.as_deref(),
-                                        &borrowed,
-                                    )
-                                {
-                                    let id = borrowed
-                                        .get("id")
-                                        .and_then(BorrowedValue::as_str)
-                                        .expect("validated borrowed ID");
-                                    identities.push(id, partition, offset);
-                                    match decoded {
-                                        Some(present) => {
-                                            executor.push_positioned(&borrowed, present, ordinal)
-                                        }
-                                        None => executor.push_borrowed(&borrowed, ordinal),
-                                    }
-                                    ordinal += 1;
-                                    return Ok(());
-                                }
-                            } else {
-                                // A torn suffix or canonical replay must not publish
-                                // incomplete positional metadata.
-                                pending_index = None;
-                            }
-                            // Canonical storage decoding is intentionally row-local:
-                            // every read row is decoded and validated before filtering.
-                            // Complex schemas and callbacks use the ordinary decoder.
-                            let mut terminated = Vec::new();
-                            let bytes = if final_unterminated {
-                                bytes
-                            } else {
-                                terminated.extend_from_slice(bytes);
-                                terminated.push(b'\n');
-                                &terminated
-                            };
-                            let mut loaded = proseql_storage::append::decode_append_bytes(
-                                host.as_ref(),
-                                &formats,
-                                &file,
-                                &decode_config,
-                                bytes,
-                                true,
-                            )?;
-                            crate::schema_checks::decode_loaded_records(
-                                &config.schema,
-                                &config.id_strategy,
-                                &mut loaded.records,
-                                &callbacks,
-                            )?;
-                            for (id, row) in loaded.records {
-                                proseql_storage::partitioned::check_partition_record(
-                                    &source, path, &id, &row,
-                                )?;
-                                validate_row(&config.schema, &row, &callbacks)?;
-                                identities.push(&id, partition, offset);
-                                executor.push(&row, ordinal);
-                                ordinal += 1;
-                            }
-                            if loaded.torn.is_some() {
-                                let torn = torn_diagnostic(host.as_ref(), path, offset)?;
-                                let sources = state.sources.as_mut().expect("source");
-                                sources.torn.retain(|old| old.path != *path);
-                                sources.torn.push(torn);
-                            }
-                            Ok(())
-                        },
-                    )
-                };
-                if partition_result.is_ok() {
-                    if let Some(index) =
-                        pending_index.and_then(|index| index.complete(host.as_ref()).ok())
-                    {
-                        state
+                        None
+                    };
+                    let range = match file_seek.zip(observed.as_ref()) {
+                        Some(((field, lower, upper), observed)) => state
                             .sources
                             .as_mut()
                             .expect("source")
@@ -398,77 +196,291 @@ impl NativeRuntime {
                             .expect("lazy")
                             .stream
                             .index
-                            .publish_time_index(path, file_seek.expect("index field").0, index);
+                            // An optional index is not the error authority. If
+                            // building/refreshing it fails, scan canonically so
+                            // parse/ID/schema error precedence stays unchanged.
+                            .time_index(host.as_ref(), path, field, observed.clone())
+                            .ok()
+                            .flatten()
+                            .and_then(|index| index.seek(lower, upper)),
+                        None => None,
+                    };
+                    let mut pending_index = if let Some(((field, _, _), observed)) =
+                        file_seek.filter(|_| range.is_none()).zip(observed)
+                    {
+                        state.sources.as_ref().expect("source").lazy[collection]
+                            .stream
+                            .index
+                            .begin_time_index(path, field, observed)
+                            .ok()
+                            .flatten()
+                    } else {
+                        None
+                    };
+                    if let Some(range) = range {
+                        index_used = IndexUsed::Ordered;
+                        if range
+                            .end_offset
+                            .is_some_and(|end| range.start_offset >= end)
+                        {
+                            continue;
+                        }
                     }
-                }
-                if let Err(error) = partition_result {
-                    // Earlier partitions can already contain a cross-file
-                    // duplicate, which precedes this partition's load error.
-                    identities.entries.truncate(identity_start);
-                    identities.scopes.pop();
-                    identities.validate(
-                        host.as_ref(),
-                        &source,
-                        &paths,
-                        (!builtin).then_some((&formats, &decode_config)),
-                    )?;
-                    // Error-only canonical replay keeps whole-partition parse,
-                    // ID, schema and partition-error precedence and payloads.
-                    return Err(validate_partition_after_error(
-                        host.as_ref(),
-                        &formats,
-                        &source,
-                        path,
-                        &config,
-                        &callbacks,
-                    )
-                    .err()
-                    .unwrap_or(error));
-                }
-            }
-            if let Err(error) = identities.validate(
-                host.as_ref(),
-                &source,
-                &paths,
-                (!builtin).then_some((&formats, &decode_config)),
-            ) {
-                if let EngineError::SourceConfig(source_error) = &error {
-                    if let Some(path) = &source_error.path {
-                        validate_partition_after_error(
+                    let identity_start = identities.entries.len();
+                    identities.scopes.push((partition, range));
+                    stats.partitions_read += 1;
+                    let file = proseql_storage::partitioned::file_source(&source, path);
+                    let partition_result = if !builtin {
+                        (|| {
+                            // Custom codecs retain their whole-document decode contract.
+                            // One partition's records coexist with query workspace;
+                            // positional indexes cannot interpret these custom rows.
+                            let raw = host.read_bytes(path)?;
+                            let mut loaded = proseql_storage::append::decode_append_bytes(
+                                host.as_ref(),
+                                &formats,
+                                &file,
+                                &decode_config,
+                                &raw,
+                                true,
+                            )?;
+                            crate::schema_checks::decode_loaded_records(
+                                &config.schema,
+                                &config.id_strategy,
+                                &mut loaded.records,
+                                &callbacks,
+                            )?;
+                            for (id, row) in &loaded.records {
+                                proseql_storage::partitioned::check_partition_record(
+                                    &source, path, id, row,
+                                )?;
+                            }
+                            for row in loaded.records.values() {
+                                validate_row(&config.schema, row, &callbacks)?;
+                            }
+                            for (index, (id, row)) in loaded.records.iter().enumerate() {
+                                identities.push(id, partition, index as u64);
+                                executor.push(row, ordinal);
+                                ordinal += 1;
+                            }
+                            if let Some(torn) = loaded.torn {
+                                let sources = state.sources.as_mut().expect("source");
+                                sources.torn.retain(|old| old.path != *path);
+                                sources.torn.push(torn);
+                            }
+                            Ok(())
+                        })()
+                    } else {
+                        let expected_key =
+                            proseql_storage::partition_prune::partition_key_of_path(&source, path);
+                        read_rows(
+                            host.as_ref(),
+                            path,
+                            range,
+                            |bytes, final_unterminated, _line, offset| {
+                                use proseql_engine::scan::borrowed::BorrowedValue;
+                                let parsed = match &prepared_decoder {
+                                    Some(decoder) => decoder
+                                        .decode_positioned(bytes)
+                                        .ok()
+                                        .flatten()
+                                        .map(|(row, present)| (row, Some(present)))
+                                        // A canonical payload fallback can still
+                                        // provide an eligible untransformed key.
+                                        .or_else(|| {
+                                            serde_json::from_slice::<BorrowedValue<'_>>(bytes)
+                                                .ok()
+                                                .map(|row| (row, None))
+                                        }),
+                                    None => serde_json::from_slice::<BorrowedValue<'_>>(bytes)
+                                        .ok()
+                                        .map(|row| (row, None)),
+                                };
+                                if let Some((mut borrowed, decoded)) = parsed {
+                                    if let Some(index) = pending_index.as_mut() {
+                                        let field = file_seek.expect("index field").0;
+                                        index.push_key(
+                                            borrowed
+                                                .get(field)
+                                                .map_or(Value::Null, BorrowedValue::to_owned),
+                                            offset,
+                                            final_unterminated,
+                                        );
+                                    }
+                                    if matches!(
+                                        config.id_strategy,
+                                        proseql_engine::descriptor::IdStrategy::Provided
+                                    ) && (decoded.is_some()
+                                        || borrowed.decode_simple(&config.schema))
+                                        && borrowed
+                                            .get("id")
+                                            .and_then(BorrowedValue::as_str)
+                                            .is_some_and(|id| !id.is_empty())
+                                        && borrowed_partition_matches(
+                                            &source,
+                                            expected_key.as_deref(),
+                                            &borrowed,
+                                        )
+                                    {
+                                        let id = borrowed
+                                            .get("id")
+                                            .and_then(BorrowedValue::as_str)
+                                            .expect("validated borrowed ID");
+                                        identities.push(id, partition, offset);
+                                        match decoded {
+                                            Some(present) => executor
+                                                .push_positioned(&borrowed, present, ordinal),
+                                            None => executor.push_borrowed(&borrowed, ordinal),
+                                        }
+                                        ordinal += 1;
+                                        return Ok(());
+                                    }
+                                } else {
+                                    // A torn suffix or canonical replay must not publish
+                                    // incomplete positional metadata.
+                                    pending_index = None;
+                                }
+                                // Canonical storage decoding is intentionally row-local:
+                                // every read row is decoded and validated before filtering.
+                                // Complex schemas and callbacks use the ordinary decoder.
+                                let mut terminated = Vec::new();
+                                let bytes = if final_unterminated {
+                                    bytes
+                                } else {
+                                    terminated.extend_from_slice(bytes);
+                                    terminated.push(b'\n');
+                                    &terminated
+                                };
+                                let mut loaded = proseql_storage::append::decode_append_bytes(
+                                    host.as_ref(),
+                                    &formats,
+                                    &file,
+                                    &decode_config,
+                                    bytes,
+                                    true,
+                                )?;
+                                crate::schema_checks::decode_loaded_records(
+                                    &config.schema,
+                                    &config.id_strategy,
+                                    &mut loaded.records,
+                                    &callbacks,
+                                )?;
+                                for (id, row) in loaded.records {
+                                    proseql_storage::partitioned::check_partition_record(
+                                        &source, path, &id, &row,
+                                    )?;
+                                    validate_row(&config.schema, &row, &callbacks)?;
+                                    identities.push(&id, partition, offset);
+                                    executor.push(&row, ordinal);
+                                    ordinal += 1;
+                                }
+                                if loaded.torn.is_some() {
+                                    let torn = torn_diagnostic(host.as_ref(), path, offset)?;
+                                    let sources = state.sources.as_mut().expect("source");
+                                    sources.torn.retain(|old| old.path != *path);
+                                    sources.torn.push(torn);
+                                }
+                                Ok(())
+                            },
+                        )
+                    };
+                    if partition_result.is_ok() {
+                        if let Some(index) =
+                            pending_index.and_then(|index| index.complete(host.as_ref()).ok())
+                        {
+                            state
+                                .sources
+                                .as_mut()
+                                .expect("source")
+                                .lazy
+                                .get_mut(collection)
+                                .expect("lazy")
+                                .stream
+                                .index
+                                .publish_time_index(path, file_seek.expect("index field").0, index);
+                        }
+                    }
+                    if let Err(error) = partition_result {
+                        // Earlier partitions can already contain a cross-file
+                        // duplicate, which precedes this partition's load error.
+                        identities.entries.truncate(identity_start);
+                        identities.scopes.pop();
+                        identities.validate(
+                            host.as_ref(),
+                            &source,
+                            &paths,
+                            (!builtin).then_some((&formats, &decode_config)),
+                        )?;
+                        // Error-only canonical replay keeps whole-partition parse,
+                        // ID, schema and partition-error precedence and payloads.
+                        return Err(validate_partition_after_error(
                             host.as_ref(),
                             &formats,
                             &source,
                             path,
                             &config,
                             &callbacks,
-                        )?;
+                        )
+                        .err()
+                        .unwrap_or(error));
                     }
                 }
-                return Err(error);
-            }
-            let candidate_rows = executor.candidate_rows;
-            stats.candidate_rows = candidate_rows;
-            let output = match executor.finish()? {
-                ScanOutput::Rows(rows) => match request {
-                    ReadRequest::QueryWithStats { .. } => ReadOutput::RowsWithStats(
-                        rows,
-                        NativeQueryStats {
-                            partitions_loaded: stats.partitions_visited,
-                            partitions_read: stats.partitions_read,
-                            partitions_resident: 0,
-                            index_used,
-                            candidate_rows,
-                            index_sorted: false,
-                        },
-                    ),
-                    _ => ReadOutput::Rows(rows),
-                },
-                ScanOutput::Page(page) => ReadOutput::Page(page),
-                ScanOutput::Aggregate(result) => ReadOutput::Aggregate(result),
-                ScanOutput::Grouped(groups) => ReadOutput::Grouped(groups),
-            };
-            Ok((output, stats))
-        })())
+                if let Err(error) = identities.validate(
+                    host.as_ref(),
+                    &source,
+                    &paths,
+                    (!builtin).then_some((&formats, &decode_config)),
+                ) {
+                    if let EngineError::SourceConfig(source_error) = &error {
+                        if let Some(path) = &source_error.path {
+                            validate_partition_after_error(
+                                host.as_ref(),
+                                &formats,
+                                &source,
+                                path,
+                                &config,
+                                &callbacks,
+                            )?;
+                        }
+                    }
+                    return Err(error);
+                }
+                let candidate_rows = executor.candidate_rows;
+                stats.candidate_rows = candidate_rows;
+                let output = match executor.finish()? {
+                    ScanOutput::Rows(rows) => match request {
+                        ReadRequest::QueryWithStats { .. } => ReadOutput::RowsWithStats(
+                            rows,
+                            NativeQueryStats {
+                                partitions_loaded: stats.partitions_visited,
+                                partitions_read: stats.partitions_read,
+                                partitions_resident: 0,
+                                index_used,
+                                candidate_rows,
+                                index_sorted: false,
+                            },
+                        ),
+                        _ => ReadOutput::Rows(rows),
+                    },
+                    ScanOutput::Page(page) => ReadOutput::Page(page),
+                    ScanOutput::Aggregate(result) => ReadOutput::Aggregate(result),
+                    ScanOutput::Grouped(groups) => ReadOutput::Grouped(groups),
+                };
+                Ok((output, stats))
+            })());
+        if result.as_ref().is_some_and(Result::is_err) {
+            state
+                .sources
+                .as_mut()
+                .expect("source")
+                .lazy
+                .get_mut(collection)
+                .expect("lazy")
+                .stream
+                .index
+                .scan_failed();
+        }
+        result
     }
 }
 

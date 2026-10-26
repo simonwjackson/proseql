@@ -1,6 +1,7 @@
 //! Disposable in-memory indexes over checked text generations.
 //! Built-in JSONL uses byte offsets; custom codecs use partition verification.
 mod id;
+pub mod persist;
 pub mod rows;
 mod time;
 

@@ -86,6 +86,8 @@ pub enum DurabilityFaultPoint {
     AppendWrite,
     /// Durable append: checked after all data is written, before the file sync.
     AppendSync,
+    /// Disposable index temp file is complete, but not yet renamed.
+    IndexRename,
 }
 
 /// Optional fault seam used by native durability conformance suites.
@@ -327,6 +329,13 @@ impl FsStorageHost {
                 let Ok(event) = result else {
                     return;
                 };
+                if event
+                    .paths
+                    .iter()
+                    .any(|path| crate::index::persist::hidden(&path.to_string_lossy()))
+                {
+                    return;
+                }
                 let kind = Self::map_event_kind(&event.kind);
                 let changed = event
                     .paths
@@ -767,6 +776,53 @@ impl DurableStorageHost for FsStorageHost {
 }
 
 impl StorageHost for FsStorageHost {
+    fn supports_indexes(&self) -> bool {
+        true
+    }
+    fn read_index(&self, path: &str) -> Option<Vec<u8>> {
+        let mut file = std::fs::File::open(path).ok()?;
+        // A damaged or hostile sidecar must not allocate without a bound.
+        let len = file.metadata().ok()?.len();
+        if len > 64 * 1024 * 1024 {
+            return None;
+        }
+        let mut bytes = Vec::with_capacity(len as usize);
+        std::io::Read::by_ref(&mut file)
+            .take(64 * 1024 * 1024 + 1)
+            .read_to_end(&mut bytes)
+            .ok()?;
+        (bytes.len() <= 64 * 1024 * 1024).then_some(bytes)
+    }
+    fn write_index_atomic(&self, path: &str, data: &[u8]) {
+        use std::io::Write;
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let temp = format!(
+            "{path}.{}.{}.tmp",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        );
+        // No fsync: losing derived data is harmless. Rename publishes only a
+        // complete file. Checksum/generation checks reject power-loss damage.
+        let result = (|| -> std::io::Result<()> {
+            if let Some(parent) = Path::new(path).parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&temp)?;
+            file.write_all(data)?;
+            drop(file);
+            self.check_durability_fault(DurabilityFaultPoint::IndexRename)
+                .map_err(|error| std::io::Error::other(error.to_string()))?;
+            std::fs::rename(&temp, path)
+        })();
+        if result.is_err() {
+            let _ = std::fs::remove_file(temp);
+        }
+    }
+
     fn read(&self, path: &str) -> Result<String, EngineError> {
         let _phase = crate::diagnostics::span("filesystem_read_text_including_recovery");
         self.recover_durable_path(path)?;
@@ -922,6 +978,7 @@ impl StorageHost for FsStorageHost {
                     })
             })
             .collect::<Result<Vec<_>, _>>()?;
+        entries.retain(|path| !crate::index::persist::hidden(path));
         entries.sort();
         Ok(entries)
     }
@@ -936,6 +993,7 @@ impl StorageHost for FsStorageHost {
     fn list_recursive(&self, root_path: &str) -> Result<Vec<String>, EngineError> {
         let mut entries = WalkDir::new(root_path)
             .into_iter()
+            .filter_entry(|entry| entry.file_name() != crate::index::persist::DIRECTORY)
             .filter_map(|entry| match entry {
                 Ok(entry) if entry.file_type().is_file() => {
                     Some(Ok(normalize_path(&entry.path().to_string_lossy())))
@@ -948,6 +1006,7 @@ impl StorageHost for FsStorageHost {
                 ))),
             })
             .collect::<Result<Vec<_>, _>>()?;
+        entries.retain(|path| !crate::index::persist::hidden(path));
         entries.sort();
         Ok(entries)
     }
@@ -1072,6 +1131,9 @@ fn list_directory_observations(
     let mut seen = std::collections::BTreeSet::new();
     for entry in listed {
         let path = normalize_path(&entry.path().to_string_lossy());
+        if crate::index::persist::hidden(&path) {
+            continue;
+        }
         let metadata = if recovery.contains(&path) {
             // Recovery can replace this inode or remove a pending first write.
             std::fs::metadata(entry.path())

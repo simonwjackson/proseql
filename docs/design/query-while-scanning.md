@@ -51,6 +51,72 @@ Ordinary query-local identity metadata is 8 bytes per visited row. Equal hashes 
 
 Own appends can advance time indexes through checked `AppendProof` evidence. The cached generation must exactly match `before`, the host must still match `after`, and the old indexed prefix must end on a complete line. Otherwise the index refreshes normally; an external change clears append evidence. This prevents a same-length external edit followed by an own append from blessing stale checkpoints. Thirty-two-row checkpoints trade faster narrow ranges for more retained metadata: the 256-shard fixture uses 3,487,424 bytes versus 216,832 at stride 1,024. See the [round-2 read report](../benchmarks/query-while-scanning-perf-read.md).
 
+
+## Disposable index files
+
+Native `FsStorageHost` can write derived files under each lazy partitioned
+source's `<root>/.proseql-index/` directory. For `2025-05.jsonl` the files are
+`2025-05.jsonl.ids.idx`, `2025-05.jsonl.valid.idx`, and
+`2025-05.jsonl.time-<field-hash>.idx` for each used ordered field. Partition
+listings and managed filesystem watch notifications ignore this directory.
+WASM/browser and memory hosts do not persist indexes. Custom codecs, schemas
+with checks/default callbacks, and migration configurations keep the text path:
+closure implementations cannot be fingerprinted across processes.
+
+Text remains the only source of truth. Delete `.proseql-index` at any time,
+including while the runtime runs. Missing, unreadable, truncated, damaged,
+old-format, old-index-version or different-schema files are cache misses, never
+new database errors. Files can reappear on release or close. Orphan `*.tmp`
+files are ignored and can also be deleted. Cache files are not an interchange
+format or a substitute for text backups.
+
+The little-endian versioned envelope contains magic, format/index versions,
+relative text path, covered byte length, trusted change token and modification
+time, a checked prefix hash, schema/config fingerprint, payload length and a
+checksum over the entire envelope/payload. An unchanged trusted generation
+needs metadata checks, not a text read. A grown file needs one checked hash
+read per distinct covered prefix, shared across sidecar kinds, followed by
+suffix scanning. Edits, truncation, replacement or mismatched prefixes rebuild
+from text. Every restored source is checked again before publication. These
+checks retain the existing race window; they do not add locking or snapshots.
+
+ID sidecars contain hashes and exact file-local locations, never authoritative
+IDs or records. The merged locator still checks cross-partition duplicate IDs,
+including collisions verified against text. A stale or missing sidecar cannot
+make a duplicate create succeed. Reads still decode/validate candidate records.
+Validation records certify only the checked text generation under the saved
+schema/config fingerprint. Loading membership without a validation record does
+not bypass payload validation or validation-before-duplicate precedence.
+
+Time sidecars are eligible only after whole-file canonical validation succeeded
+under that fingerprint. A failed read disables pending time publication. A
+grown time sidecar requires canonical validation of its new suffix before
+seeking; failure falls back to the canonical full scan and its original error.
+Existing in-memory safe-seek semantics remain unchanged. Tests compare invalid
+original and appended payload errors with and without sidecars.
+
+Publication uses a unique `create_new` temporary file and a same-directory
+rename. There is deliberately no file or directory fsync for this derived data:
+losing it only costs rebuilding. A crash before rename leaves the old index or
+none; a power-loss-damaged file fails checksum/generation checks. Text append
+sync, read-back evidence, rollback and quarantine rules do not change.
+
+Writes are deferred to `release_streaming_indexes()` and successful `close()`,
+not performed per appended row or per query. Checked own-appends advance locator
+and validation coverage through the existing append evidence. A process that
+exits without release/close may lose recent index work, never text. Index writes
+and hashing can increase release/close latency. After loading a checked index,
+publication reuses its checked full-prefix hash when the token is unchanged.
+
+Disk cost: an ID payload is 24 bytes per row plus 24 bytes per file; a validation
+payload is empty. Each envelope adds 112 bytes plus the relative-path byte
+length. Time payloads use JSON scalar checkpoints inside the binary envelope,
+one checkpoint every 32 rows, so cost depends on key length and field count.
+The reader caps each individual sidecar at 64 MiB; larger indexes fall back to
+text. This caps corrupt-file allocation, not collection size. Checksums detect
+accidental damage, not a hostile writer forging cache files and checksums.
+[Round-4 measured sizes, latency, memory and remaining misses](../benchmarks/query-while-scanning-persist-round4.md).
+
 ## ID locator and generations
 
 First ID use builds a compact global membership/location table. `find_by_id` also validates every payload once per checked generation. A create builds membership by scanning ID fields and validates only matching duplicate candidates. The locator stores hashes and source locations, not full IDs or rows. A possible hit is verified against the authoritative text and schema; a hash cannot prove equality. Custom codecs use partition-level locations and decode the whole candidate partition through the registered codec.
@@ -144,7 +210,7 @@ The historical round-1 [index measurements](../../crates/proseql-storage/src/ind
 | External one-row append refresh | 22.556 ms | One changed month |
 | 256 locator append calls, four rows each | 0.614 ms | Metadata only, excludes writes and full append latency |
 
-The append delta retains an unsorted bounded suffix, then merges it at 4,096 entries. It avoids sorting the entire base table for each touched shard. Its measured 256-shard structure grows from 15,885,440 to 16,028,544 B. First ID use retains about 15 MiB even after results drop; that can miss the strict post-query return-to-unindexed-idle target. A text-validated sidecar or explicit prebuild could move startup work, but neither is implemented. Compact entries could reduce memory, not validation I/O.
+The append delta retains an unsorted bounded suffix, then merges it at 4,096 entries. It avoids sorting the entire base table for each touched shard. Its measured 256-shard structure grows from 15,885,440 to 16,028,544 B. First ID use retains about 15 MiB even after results drop; that can miss the strict post-query return-to-unindexed-idle target. Round 4 adds checked disposable sidecars; the historical measurements in this table predate them. Compact entries could reduce memory, not validation I/O.
 
 The [formats evidence](../../packages/engine/benchmarks/blob-scan.json) measured 100 MiB framing with at most 65,536 host chunk bytes, 66,559 framer capacity bytes and a 197,631 B simultaneous-buffer upper bound. This is buffer capacity, not whole-process memory. The framer bound grows with the longest line.
 
