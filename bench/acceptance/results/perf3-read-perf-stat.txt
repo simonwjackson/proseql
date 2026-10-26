@@ -1,0 +1,839 @@
+## baseline/timing-raw-hour-sqlite-cold-0.perf
+# started on Mon Oct 26 15:48:12 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base sqlite raw hour cold':
+
+         4,984,738      instructions:u                                                        
+
+       1.004313376 seconds time elapsed
+
+       0.001439000 seconds user
+       0.001427000 seconds sys
+
+
+
+## baseline/timing-raw-hour-sqlite-warm-0.perf
+# started on Mon Oct 26 15:48:13 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base sqlite raw hour warm':
+
+         8,737,587      instructions:u                                                        
+
+       1.003388121 seconds time elapsed
+
+       0.003042000 seconds user
+       0.000000000 seconds sys
+
+
+
+## baseline/timing-raw-hour-streaming-cold-0.perf
+# started on Mon Oct 26 15:48:14 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base streaming raw hour cold':
+
+     8,820,673,715      instructions:u                                                        
+
+       1.611357844 seconds time elapsed
+
+       0.465516000 seconds user
+       0.101058000 seconds sys
+
+
+
+## baseline/timing-raw-hour-streaming-warm-0.perf
+# started on Mon Oct 26 15:48:16 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base streaming raw hour warm':
+
+     8,938,611,444      instructions:u                                                        
+
+       1.502208002 seconds time elapsed
+
+       0.454336000 seconds user
+       0.045717000 seconds sys
+
+
+
+## baseline/timing-raw-point-sqlite-cold-0.perf
+# started on Mon Oct 26 15:48:10 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base sqlite raw point cold':
+
+         1,368,918      instructions:u                                                        
+
+       1.003541038 seconds time elapsed
+
+       0.000000000 seconds user
+       0.002482000 seconds sys
+
+
+
+## baseline/timing-raw-point-sqlite-warm-0.perf
+# started on Mon Oct 26 15:48:11 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base sqlite raw point warm':
+
+         1,478,198      instructions:u                                                        
+
+       1.002338168 seconds time elapsed
+
+       0.001118000 seconds user
+       0.001122000 seconds sys
+
+
+
+## baseline/timing-raw-point-streaming-cold-0.perf
+# started on Mon Oct 26 15:48:04 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base streaming raw point cold':
+
+    14,172,141,080      instructions:u                                                        
+
+       2.797819351 seconds time elapsed
+
+       0.660385000 seconds user
+       0.089205000 seconds sys
+
+
+
+## baseline/timing-raw-point-streaming-warm-0.perf
+# started on Mon Oct 26 15:48:07 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base streaming raw point warm':
+
+    14,181,894,945      instructions:u                                                        
+
+       2.723397490 seconds time elapsed
+
+       0.667506000 seconds user
+       0.052806000 seconds sys
+
+
+
+## baseline/timing-raw-ten-sqlite-cold-0.perf
+# started on Mon Oct 26 15:47:56 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base sqlite raw ten cold':
+
+     4,422,351,614      instructions:u                                                        
+
+       1.422877112 seconds time elapsed
+
+       0.265221000 seconds user
+       0.127521000 seconds sys
+
+
+
+## baseline/timing-raw-ten-sqlite-warm-0.perf
+# started on Mon Oct 26 15:47:58 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base sqlite raw ten warm':
+
+     8,838,495,290      instructions:u                                                        
+
+       1.613710551 seconds time elapsed
+
+       0.478415000 seconds user
+       0.132824000 seconds sys
+
+
+
+## baseline/timing-raw-ten-streaming-cold-0.perf
+# started on Mon Oct 26 15:48:00 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base streaming raw ten cold':
+
+     9,846,878,438      instructions:u                                                        
+
+       1.649440028 seconds time elapsed
+
+       0.508778000 seconds user
+       0.095900000 seconds sys
+
+
+
+## baseline/timing-raw-ten-streaming-warm-0.perf
+# started on Mon Oct 26 15:48:02 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base streaming raw ten warm':
+
+    19,297,486,497      instructions:u                                                        
+
+       2.020301630 seconds time elapsed
+
+       0.940830000 seconds user
+       0.075802000 seconds sys
+
+
+
+## baseline/timing-samples-hour-sqlite-cold-0.perf
+# started on Mon Oct 26 15:47:44 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base sqlite samples hour cold':
+
+         4,724,692      instructions:u                                                        
+
+       1.003794494 seconds time elapsed
+
+       0.000980000 seconds user
+       0.001938000 seconds sys
+
+
+
+## baseline/timing-samples-hour-sqlite-warm-0.perf
+# started on Mon Oct 26 15:47:45 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base sqlite samples hour warm':
+
+         8,213,270      instructions:u                                                        
+
+       1.002971068 seconds time elapsed
+
+       0.000970000 seconds user
+       0.001943000 seconds sys
+
+
+
+## baseline/timing-samples-hour-streaming-cold-0.perf
+# started on Mon Oct 26 15:47:46 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base streaming samples hour cold':
+
+       858,136,356      instructions:u                                                        
+
+       1.056457562 seconds time elapsed
+
+       0.043217000 seconds user
+       0.012089000 seconds sys
+
+
+
+## baseline/timing-samples-hour-streaming-warm-0.perf
+# started on Mon Oct 26 15:47:47 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base streaming samples hour warm':
+
+       861,653,671      instructions:u                                                        
+
+       1.050374175 seconds time elapsed
+
+       0.040954000 seconds user
+       0.008774000 seconds sys
+
+
+
+## baseline/timing-samples-month-sqlite-cold-0.perf
+# started on Mon Oct 26 15:47:41 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base sqlite samples month cold':
+
+       273,866,481      instructions:u                                                        
+
+       1.034943593 seconds time elapsed
+
+       0.017048000 seconds user
+       0.015188000 seconds sys
+
+
+
+## baseline/timing-samples-month-sqlite-warm-0.perf
+# started on Mon Oct 26 15:47:43 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base sqlite samples month warm':
+
+       545,769,429      instructions:u                                                        
+
+       1.042984041 seconds time elapsed
+
+       0.029852000 seconds user
+       0.012920000 seconds sys
+
+
+
+## baseline/timing-samples-month-streaming-cold-0.perf
+# started on Mon Oct 26 15:47:39 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base streaming samples month cold':
+
+     1,731,954,577      instructions:u                                                        
+
+       1.106178637 seconds time elapsed
+
+       0.088060000 seconds user
+       0.016857000 seconds sys
+
+
+
+## baseline/timing-samples-month-streaming-warm-0.perf
+# started on Mon Oct 26 15:47:40 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base streaming samples month warm':
+
+     2,596,853,228      instructions:u                                                        
+
+       1.142803192 seconds time elapsed
+
+       0.125925000 seconds user
+       0.016125000 seconds sys
+
+
+
+## baseline/timing-samples-point-sqlite-cold-0.perf
+# started on Mon Oct 26 15:47:54 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base sqlite samples point cold':
+
+         1,363,436      instructions:u                                                        
+
+       1.003772735 seconds time elapsed
+
+       0.000000000 seconds user
+       0.002668000 seconds sys
+
+
+
+## baseline/timing-samples-point-sqlite-warm-0.perf
+# started on Mon Oct 26 15:47:55 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base sqlite samples point warm':
+
+         1,465,096      instructions:u                                                        
+
+       1.002487618 seconds time elapsed
+
+       0.000000000 seconds user
+       0.002403000 seconds sys
+
+
+
+## baseline/timing-samples-point-streaming-cold-0.perf
+# started on Mon Oct 26 15:47:48 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base streaming samples point cold':
+
+    11,806,573,732      instructions:u                                                        
+
+       2.662845019 seconds time elapsed
+
+       0.576426000 seconds user
+       0.079573000 seconds sys
+
+
+
+## baseline/timing-samples-point-streaming-warm-0.perf
+# started on Mon Oct 26 15:47:51 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base streaming samples point warm':
+
+    11,806,944,369      instructions:u                                                        
+
+       2.605790884 seconds time elapsed
+
+       0.564011000 seconds user
+       0.038939000 seconds sys
+
+
+
+## baseline/timing-samples-ten-sqlite-cold-0.perf
+# started on Mon Oct 26 15:47:32 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base sqlite samples ten cold':
+
+     4,422,330,482      instructions:u                                                        
+
+       1.421334735 seconds time elapsed
+
+       0.254887000 seconds user
+       0.138200000 seconds sys
+
+
+
+## baseline/timing-samples-ten-sqlite-warm-0.perf
+# started on Mon Oct 26 15:47:33 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base sqlite samples ten warm':
+
+     8,838,487,596      instructions:u                                                        
+
+       1.621902020 seconds time elapsed
+
+       0.479886000 seconds user
+       0.139674000 seconds sys
+
+
+
+## baseline/timing-samples-ten-streaming-cold-0.perf
+# started on Mon Oct 26 15:47:35 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base streaming samples ten cold':
+
+     8,836,262,113      instructions:u                                                        
+
+       1.519145294 seconds time elapsed
+
+       0.438102000 seconds user
+       0.075397000 seconds sys
+
+
+
+## baseline/timing-samples-ten-streaming-warm-0.perf
+# started on Mon Oct 26 15:47:37 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base streaming samples ten warm':
+
+    17,629,023,519      instructions:u                                                        
+
+       1.909217130 seconds time elapsed
+
+       0.839714000 seconds user
+       0.065886000 seconds sys
+
+
+
+## final/timing-raw-hour-sqlite-cold-0.perf
+# started on Mon Oct 26 16:32:09 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base sqlite raw hour cold':
+
+         4,985,195      instructions:u                                                        
+
+       1.004498240 seconds time elapsed
+
+       0.001542000 seconds user
+       0.001537000 seconds sys
+
+
+
+## final/timing-raw-hour-sqlite-warm-0.perf
+# started on Mon Oct 26 16:32:10 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base sqlite raw hour warm':
+
+         8,738,878      instructions:u                                                        
+
+       1.003303746 seconds time elapsed
+
+       0.000734000 seconds user
+       0.002210000 seconds sys
+
+
+
+## final/timing-raw-hour-streaming-cold-0.perf
+# started on Mon Oct 26 16:32:11 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base streaming raw hour cold':
+
+     8,787,201,005      instructions:u                                                        
+
+       1.612705043 seconds time elapsed
+
+       0.462711000 seconds user
+       0.105133000 seconds sys
+
+
+
+## final/timing-raw-hour-streaming-warm-0.perf
+# started on Mon Oct 26 16:32:13 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base streaming raw hour warm':
+
+     8,903,156,178      instructions:u                                                        
+
+       1.516744098 seconds time elapsed
+
+       0.461998000 seconds user
+       0.052764000 seconds sys
+
+
+
+## final/timing-raw-point-sqlite-cold-0.perf
+# started on Mon Oct 26 16:32:07 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base sqlite raw point cold':
+
+         1,369,390      instructions:u                                                        
+
+       1.003718239 seconds time elapsed
+
+       0.001674000 seconds user
+       0.000831000 seconds sys
+
+
+
+## final/timing-raw-point-sqlite-warm-0.perf
+# started on Mon Oct 26 16:32:08 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base sqlite raw point warm':
+
+         1,478,740      instructions:u                                                        
+
+       1.002231845 seconds time elapsed
+
+       0.000000000 seconds user
+       0.002142000 seconds sys
+
+
+
+## final/timing-raw-point-streaming-cold-0.perf
+# started on Mon Oct 26 16:32:01 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base streaming raw point cold':
+
+    11,229,331,025      instructions:u                                                        
+
+       2.710833988 seconds time elapsed
+
+       0.568100000 seconds user
+       0.095537000 seconds sys
+
+
+
+## final/timing-raw-point-streaming-warm-0.perf
+# started on Mon Oct 26 16:32:04 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base streaming raw point warm':
+
+    11,235,342,598      instructions:u                                                        
+
+       2.646104135 seconds time elapsed
+
+       0.594625000 seconds user
+       0.048800000 seconds sys
+
+
+
+## final/timing-raw-ten-sqlite-cold-0.perf
+# started on Mon Oct 26 16:31:54 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base sqlite raw ten cold':
+
+     4,422,351,904      instructions:u                                                        
+
+       1.423357703 seconds time elapsed
+
+       0.260605000 seconds user
+       0.133522000 seconds sys
+
+
+
+## final/timing-raw-ten-sqlite-warm-0.perf
+# started on Mon Oct 26 16:31:55 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base sqlite raw ten warm':
+
+     8,838,495,384      instructions:u                                                        
+
+       1.604656951 seconds time elapsed
+
+       0.477178000 seconds user
+       0.125522000 seconds sys
+
+
+
+## final/timing-raw-ten-streaming-cold-0.perf
+# started on Mon Oct 26 16:31:57 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base streaming raw ten cold':
+
+     9,517,985,506      instructions:u                                                        
+
+       1.643528336 seconds time elapsed
+
+       0.510526000 seconds user
+       0.087937000 seconds sys
+
+
+
+## final/timing-raw-ten-streaming-warm-0.perf
+# started on Mon Oct 26 16:31:59 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base streaming raw ten warm':
+
+    18,638,241,439      instructions:u                                                        
+
+       2.025026132 seconds time elapsed
+
+       0.930361000 seconds user
+       0.090715000 seconds sys
+
+
+
+## final/timing-samples-hour-sqlite-cold-0.perf
+# started on Mon Oct 26 16:31:41 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base sqlite samples hour cold':
+
+         4,725,510      instructions:u                                                        
+
+       1.004522952 seconds time elapsed
+
+       0.000000000 seconds user
+       0.003184000 seconds sys
+
+
+
+## final/timing-samples-hour-sqlite-warm-0.perf
+# started on Mon Oct 26 16:31:42 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base sqlite samples hour warm':
+
+         8,213,639      instructions:u                                                        
+
+       1.003832487 seconds time elapsed
+
+       0.000928000 seconds user
+       0.002784000 seconds sys
+
+
+
+## final/timing-samples-hour-streaming-cold-0.perf
+# started on Mon Oct 26 16:31:44 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base streaming samples hour cold':
+
+       854,890,570      instructions:u                                                        
+
+       1.059900244 seconds time elapsed
+
+       0.049005000 seconds user
+       0.008847000 seconds sys
+
+
+
+## final/timing-samples-hour-streaming-warm-0.perf
+# started on Mon Oct 26 16:31:45 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base streaming samples hour warm':
+
+       858,433,933      instructions:u                                                        
+
+       1.051812609 seconds time elapsed
+
+       0.047483000 seconds user
+       0.004046000 seconds sys
+
+
+
+## final/timing-samples-month-sqlite-cold-0.perf
+# started on Mon Oct 26 16:31:39 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base sqlite samples month cold':
+
+       273,867,024      instructions:u                                                        
+
+       1.035880590 seconds time elapsed
+
+       0.017911000 seconds user
+       0.015245000 seconds sys
+
+
+
+## final/timing-samples-month-sqlite-warm-0.perf
+# started on Mon Oct 26 16:31:40 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base sqlite samples month warm':
+
+       545,769,917      instructions:u                                                        
+
+       1.043053362 seconds time elapsed
+
+       0.031875000 seconds user
+       0.010946000 seconds sys
+
+
+
+## final/timing-samples-month-streaming-cold-0.perf
+# started on Mon Oct 26 16:31:36 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base streaming samples month cold':
+
+     1,710,885,774      instructions:u                                                        
+
+       1.106965131 seconds time elapsed
+
+       0.087887000 seconds user
+       0.017760000 seconds sys
+
+
+
+## final/timing-samples-month-streaming-warm-0.perf
+# started on Mon Oct 26 16:31:37 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base streaming samples month warm':
+
+     2,557,024,804      instructions:u                                                        
+
+       1.141344257 seconds time elapsed
+
+       0.128885000 seconds user
+       0.011991000 seconds sys
+
+
+
+## final/timing-samples-point-sqlite-cold-0.perf
+# started on Mon Oct 26 16:31:51 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base sqlite samples point cold':
+
+         1,363,885      instructions:u                                                        
+
+       1.003461172 seconds time elapsed
+
+       0.000000000 seconds user
+       0.002688000 seconds sys
+
+
+
+## final/timing-samples-point-sqlite-warm-0.perf
+# started on Mon Oct 26 16:31:52 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base sqlite samples point warm':
+
+         1,465,803      instructions:u                                                        
+
+       1.002313164 seconds time elapsed
+
+       0.001072000 seconds user
+       0.001076000 seconds sys
+
+
+
+## final/timing-samples-point-streaming-cold-0.perf
+# started on Mon Oct 26 16:31:46 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base streaming samples point cold':
+
+     9,112,542,711      instructions:u                                                        
+
+       2.565729358 seconds time elapsed
+
+       0.475339000 seconds user
+       0.083960000 seconds sys
+
+
+
+## final/timing-samples-point-streaming-warm-0.perf
+# started on Mon Oct 26 16:31:49 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base streaming samples point warm':
+
+     9,112,876,653      instructions:u                                                        
+
+       2.511804322 seconds time elapsed
+
+       0.470052000 seconds user
+       0.039922000 seconds sys
+
+
+
+## final/timing-samples-ten-sqlite-cold-0.perf
+# started on Mon Oct 26 16:31:29 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base sqlite samples ten cold':
+
+     4,422,330,955      instructions:u                                                        
+
+       1.388399754 seconds time elapsed
+
+       0.232517000 seconds user
+       0.126441000 seconds sys
+
+
+
+## final/timing-samples-ten-sqlite-warm-0.perf
+# started on Mon Oct 26 16:31:31 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base sqlite samples ten warm':
+
+     8,838,488,115      instructions:u                                                        
+
+       1.592538598 seconds time elapsed
+
+       0.445044000 seconds user
+       0.143669000 seconds sys
+
+
+
+## final/timing-samples-ten-streaming-cold-0.perf
+# started on Mon Oct 26 16:31:33 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base streaming samples ten cold':
+
+     8,532,990,355      instructions:u                                                        
+
+       1.505302134 seconds time elapsed
+
+       0.422968000 seconds user
+       0.076616000 seconds sys
+
+
+
+## final/timing-samples-ten-streaming-warm-0.perf
+# started on Mon Oct 26 16:31:34 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-harness-data/perf3-read/timing /home/simonwjackson/work/qws-harness-data/perf3-read/base streaming samples ten warm':
+
+    17,022,333,159      instructions:u                                                        
+
+       1.866443538 seconds time elapsed
+
+       0.804749000 seconds user
+       0.058832000 seconds sys
+
+

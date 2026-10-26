@@ -321,7 +321,7 @@ impl BorrowedValue<'_> {
         }
         Some(true)
     }
-    fn matches_field(&self, condition: &Value) -> Option<bool> {
+    pub(super) fn matches_field(&self, condition: &Value) -> Option<bool> {
         if matches!(self, Self::Array(_) | Self::Object(_)) {
             return None;
         }

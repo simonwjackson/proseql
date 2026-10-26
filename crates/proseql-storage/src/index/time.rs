@@ -43,8 +43,22 @@ impl TimeIndex {
         field: &str,
         stride: usize,
     ) -> Result<Self, EngineError> {
-        let generation = SourceGeneration::observe(host, path)?;
-        Ok(Self {
+        Ok(Self::begin_observed(
+            path,
+            field,
+            stride,
+            SourceGeneration::observe(host, path)?,
+        ))
+    }
+
+    /// Use only an observation captured during the current operation.
+    pub fn begin_observed(
+        path: &str,
+        field: &str,
+        stride: usize,
+        generation: Option<SourceGeneration>,
+    ) -> Self {
+        Self {
             path: path.into(),
             field: field.into(),
             stride: stride.max(1),
@@ -54,7 +68,7 @@ impl TimeIndex {
                 .map_or(0, |generation| generation.covered_len),
             generation,
             ..Self::default()
-        })
+        }
     }
 
     pub fn push_key(&mut self, key: Value, offset: u64, final_line: bool) {
@@ -156,6 +170,31 @@ impl TimeIndex {
         }
     }
 
+    /// Reuse the caller's checked observation rather than statting twice.
+    /// Different generations conservatively rebuild: metadata is not proof
+    /// that a changed prefix is append-only.
+    pub fn refresh_observed(
+        &mut self,
+        host: &dyn StorageHost,
+        generation: SourceGeneration,
+    ) -> Result<(), EngineError> {
+        if generation.path != self.path {
+            return Err(crate::generation::changed(&self.path));
+        }
+        if self.generation.as_ref() == Some(&generation) {
+            return Ok(());
+        }
+        let mut next = Self::begin_observed(
+            &self.path,
+            &self.field,
+            self.stride,
+            Some(generation.clone()),
+        );
+        next.extend(host, &self.path, 0, Some(generation))?;
+        *self = next;
+        Ok(())
+    }
+
     fn extend(
         &mut self,
         host: &dyn StorageHost,
@@ -211,6 +250,20 @@ impl TimeIndex {
         }) {
             return None;
         }
+        // Whole-file bounds are exact only for checked, ordered indexes.
+        // Keep equality conservative because upper/lower may be inclusive.
+        if self.entries.first().is_some_and(|first| {
+            upper.is_some_and(|upper| compare(&first.key, upper) == Some(Ordering::Greater))
+        }) || self.last.as_ref().is_some_and(|last| {
+            lower.is_some_and(|lower| compare(last, lower) == Some(Ordering::Less))
+        }) {
+            let end = self.generation.as_ref()?.covered_len;
+            return Some(SeekRange {
+                start_offset: end,
+                start_row: self.rows,
+                end_offset: Some(end),
+            });
+        }
         // Strictly-before is essential: equal keys can straddle checkpoints.
         let pos = lower.map_or(0, |lower| {
             self.entries
@@ -218,10 +271,13 @@ impl TimeIndex {
                 .saturating_sub(1)
         });
         let end_offset = upper.and_then(|upper| {
-            self.entries
-                .iter()
-                .find(|entry| compare(&entry.key, upper) == Some(Ordering::Greater))
-                .map(|entry| entry.offset)
+            let end = self.entries.partition_point(|entry| {
+                matches!(
+                    compare(&entry.key, upper),
+                    Some(Ordering::Less | Ordering::Equal)
+                )
+            });
+            self.entries.get(end).map(|entry| entry.offset)
         });
         let start = self.entries.get(pos);
         Some(SeekRange {

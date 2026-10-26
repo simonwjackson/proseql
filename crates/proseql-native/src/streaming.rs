@@ -167,14 +167,27 @@ impl NativeRuntime {
             let mut identities = IdArena::default();
             let mut ordinal = 0;
             for (partition, path) in paths.iter().enumerate() {
-                if !host.exists(path)? {
-                    continue;
-                }
                 let file_seek = seek.filter(|(field, lower, upper)| {
                     !covers_partition(&source, path, field, *lower, *upper)
                 });
-                let range = match file_seek {
-                    Some((field, lower, upper)) => state
+                let observed = if file_seek.is_some() {
+                    let Some(stat) = host.stat(path)? else {
+                        continue;
+                    };
+                    proseql_storage::generation::SourceGeneration::observe_stat(
+                        host.as_ref(),
+                        path,
+                        stat,
+                    )
+                    .ok()
+                } else {
+                    if !host.exists(path)? {
+                        continue;
+                    }
+                    None
+                };
+                let range = match file_seek.zip(observed.as_ref()) {
+                    Some(((field, lower, upper), observed)) => state
                         .sources
                         .as_mut()
                         .expect("source")
@@ -186,25 +199,32 @@ impl NativeRuntime {
                         // An optional index is not the error authority. If
                         // building/refreshing it fails, scan canonically so
                         // parse/ID/schema error precedence stays unchanged.
-                        .time_index(host.as_ref(), path, field)
+                        .time_index(host.as_ref(), path, field, observed.clone())
                         .ok()
                         .flatten()
                         .and_then(|index| index.seek(lower, upper)),
                     None => None,
                 };
-                let mut pending_index =
-                    if let Some((field, _, _)) = file_seek.filter(|_| range.is_none()) {
-                        state.sources.as_ref().expect("source").lazy[collection]
-                            .stream
-                            .index
-                            .begin_time_index(host.as_ref(), path, field)
-                            .ok()
-                            .flatten()
-                    } else {
-                        None
-                    };
-                if range.is_some() {
+                let mut pending_index = if let Some(((field, _, _), observed)) =
+                    file_seek.filter(|_| range.is_none()).zip(observed)
+                {
+                    state.sources.as_ref().expect("source").lazy[collection]
+                        .stream
+                        .index
+                        .begin_time_index(path, field, observed)
+                        .ok()
+                        .flatten()
+                } else {
+                    None
+                };
+                if let Some(range) = range {
                     index_used = IndexUsed::Ordered;
+                    if range
+                        .end_offset
+                        .is_some_and(|end| range.start_offset >= end)
+                    {
+                        continue;
+                    }
                 }
                 let identity_start = identities.entries.len();
                 identities.scopes.push((partition, range));
@@ -261,20 +281,20 @@ impl NativeRuntime {
                             use proseql_engine::scan::borrowed::BorrowedValue;
                             let parsed = match &prepared_decoder {
                                 Some(decoder) => decoder
-                                    .decode(bytes)
+                                    .decode_positioned(bytes)
                                     .ok()
                                     .flatten()
-                                    .map(|row| (row, true))
+                                    .map(|(row, present)| (row, Some(present)))
                                     // A canonical payload fallback can still
                                     // provide an eligible untransformed key.
                                     .or_else(|| {
                                         serde_json::from_slice::<BorrowedValue<'_>>(bytes)
                                             .ok()
-                                            .map(|row| (row, false))
+                                            .map(|row| (row, None))
                                     }),
                                 None => serde_json::from_slice::<BorrowedValue<'_>>(bytes)
                                     .ok()
-                                    .map(|row| (row, false)),
+                                    .map(|row| (row, None)),
                             };
                             if let Some((mut borrowed, decoded)) = parsed {
                                 if let Some(index) = pending_index.as_mut() {
@@ -290,7 +310,8 @@ impl NativeRuntime {
                                 if matches!(
                                     config.id_strategy,
                                     proseql_engine::descriptor::IdStrategy::Provided
-                                ) && (decoded || borrowed.decode_simple(&config.schema))
+                                ) && (decoded.is_some()
+                                    || borrowed.decode_simple(&config.schema))
                                     && borrowed
                                         .get("id")
                                         .and_then(BorrowedValue::as_str)
@@ -306,7 +327,12 @@ impl NativeRuntime {
                                         .and_then(BorrowedValue::as_str)
                                         .expect("validated borrowed ID");
                                     identities.push(id, partition, offset);
-                                    executor.push_borrowed(&borrowed, ordinal);
+                                    match decoded {
+                                        Some(present) => {
+                                            executor.push_positioned(&borrowed, present, ordinal)
+                                        }
+                                        None => executor.push_borrowed(&borrowed, ordinal),
+                                    }
                                     ordinal += 1;
                                     return Ok(());
                                 }

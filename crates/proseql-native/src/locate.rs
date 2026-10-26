@@ -107,6 +107,7 @@ impl IndexState {
         host: &dyn StorageHost,
         path: &str,
         field: &str,
+        observed: SourceGeneration,
     ) -> Result<Option<&TimeIndex>, EngineError> {
         if self.codec.as_ref().is_some_and(|codec| !codec.positional) {
             return Ok(None);
@@ -127,7 +128,7 @@ impl IndexState {
                         return Ok(());
                     }
                 }
-                index.refresh(host)?;
+                index.refresh_observed(host, observed)?;
                 clear_proof = previous.as_ref() != index.generation();
                 Ok::<_, EngineError>(())
             })();
@@ -147,9 +148,9 @@ impl IndexState {
 
     pub(crate) fn begin_time_index(
         &self,
-        host: &dyn StorageHost,
         path: &str,
         field: &str,
+        observed: SourceGeneration,
     ) -> Result<Option<TimeIndex>, EngineError> {
         if self.times.contains_key(&(path.into(), field.into()))
             || self.codec.as_ref().is_some_and(|codec| !codec.positional)
@@ -158,7 +159,12 @@ impl IndexState {
         }
         // At 2,565 rows per raw shard, stride 1,024 scans much of every shard.
         // Thirty-two rows bounds that amplification at a measured metadata cost.
-        TimeIndex::begin(host, path, field, 32).map(Some)
+        Ok(Some(TimeIndex::begin_observed(
+            path,
+            field,
+            32,
+            Some(observed),
+        )))
     }
 
     pub(crate) fn publish_time_index(&mut self, path: &str, field: &str, index: TimeIndex) {
@@ -430,7 +436,21 @@ fn lookup(
     // Keep the historical policy, even though membership can now avoid a scan.
     sources.lazy_full_scope(collection, "findById")?;
     let source = sources.lazy[collection].source.clone();
-    let listed = crate::lazy::list_partitions(host, &source)?;
+    let mut listed = BTreeMap::new();
+    let mut listed_stats = BTreeMap::new();
+    if host.exists(&source.root)? {
+        for (path, stat) in host.list_directory_with_stat(&source.root)? {
+            if !proseql_storage::partitioned::matches_partition_path(&source, &path) {
+                continue;
+            }
+            if let Some(key) =
+                proseql_storage::partition_prune::partition_key_of_path(&source, &path)
+            {
+                listed_stats.insert(path.clone(), stat);
+                listed.insert(path, key);
+            }
+        }
+    }
     let paths = listed.keys().cloned().collect::<Vec<_>>();
     sources
         .lazy
@@ -463,6 +483,41 @@ fn lookup(
         return Ok(None);
     }
 
+    // Validate inside the locator's first scan. Already-covered membership can
+    // come from append without payload validation; those paths still need a
+    // separate pass. Changed observations conservatively validate whole files.
+    let validation = proseql_storage::diagnostics::span("streaming_id_validation");
+    let mut needed = BTreeMap::new();
+    let mut observed = PathObservations::new();
+    for path in &paths {
+        let previous = sources.lazy[collection].stream.index.validated.get(path);
+        let generation = SourceGeneration::observe_stat(host, path, listed_stats[path])?;
+        observed.insert(path.clone(), Some(generation.clone()));
+        if previous != Some(&generation) {
+            // A changed observation is not evidence of an append-only prefix.
+            needed.insert(path.clone(), generation);
+        }
+    }
+    if needed.is_empty() {
+        // Reuse the same fresh observation for validation and membership.
+        // No schema layout or document decoder is needed on a warm lookup.
+        let index = &mut sources
+            .lazy
+            .get_mut(collection)
+            .expect("lazy collection")
+            .stream
+            .index;
+        let candidates = index
+            .id_locator_observed(host, &paths, &observed, &mut |_, _, _, _| Ok(()))
+            .and_then(|locator| locator.locate(id))
+            .map_err(|error| contextualize(error, &source))?;
+        for (path, location) in candidates {
+            if let Some(row) = index.verify_candidate(host, &path, location, id)? {
+                return Ok(Some(row));
+            }
+        }
+        return Ok(None);
+    }
     let config = &sources.config.collection_configs[collection];
     let mut decode_config = config.clone();
     decode_config.schema = crate::schema_checks::storage_decode_schema(&config.schema);
@@ -472,32 +527,6 @@ fn lookup(
         source: &source,
         callbacks: &sources.callbacks,
     };
-
-    // Validate inside the locator's first scan. Already-covered membership can
-    // come from append without payload validation; those paths still need a
-    // separate pass. A checked append can reuse its previously validated prefix.
-    let validation = proseql_storage::diagnostics::span("streaming_id_validation");
-    let mut needed = BTreeMap::new();
-    for path in &paths {
-        let previous = sources.lazy[collection].stream.index.validated.get(path);
-        let (check, generation) = match previous {
-            Some(previous) => previous.advance(host)?,
-            None => (
-                GenerationCheck::Replaced,
-                SourceGeneration::observe(host, path)?,
-            ),
-        };
-        if check == GenerationCheck::Unchanged {
-            continue;
-        }
-        if let Some(generation) = generation {
-            let prefix = match check {
-                GenerationCheck::Appended { from_offset } => Some(from_offset),
-                _ => None,
-            };
-            needed.insert(path.clone(), (generation, prefix));
-        }
-    }
     let files: BTreeMap<_, _> = needed
         .keys()
         .map(|path| {
@@ -511,55 +540,59 @@ fn lookup(
         })
         .collect();
     let prepared = proseql_engine::scan::decoder::SimpleDecoder::new(&config.schema);
-    let validate_line = |path: &str, bytes: &[u8], final_line: bool| -> Result<(), EngineError> {
-        use proseql_engine::scan::borrowed::BorrowedValue;
-        let (file, expected) = &files[path];
-        if matches!(
-            config.id_strategy,
-            proseql_engine::descriptor::IdStrategy::Provided
-        ) {
-            if let Some(row) = prepared
-                .as_ref()
-                .and_then(|decoder| decoder.decode(bytes).ok().flatten())
-            {
-                if row
-                    .get("id")
-                    .and_then(BorrowedValue::as_str)
-                    .is_some_and(|id| !id.is_empty())
-                    && crate::streaming::borrowed_partition_matches(
-                        &source,
-                        expected.as_deref(),
-                        &row,
-                    )
+    let validate_line =
+        |path: &str, bytes: &[u8], final_line: bool| -> Result<Option<Box<str>>, EngineError> {
+            use proseql_engine::scan::borrowed::BorrowedValue;
+            let (file, expected) = &files[path];
+            if matches!(
+                config.id_strategy,
+                proseql_engine::descriptor::IdStrategy::Provided
+            ) {
+                if let Some(row) = prepared
+                    .as_ref()
+                    .and_then(|decoder| decoder.decode(bytes).ok().flatten())
                 {
-                    return Ok(());
+                    if row
+                        .get("id")
+                        .and_then(BorrowedValue::as_str)
+                        .is_some_and(|id| !id.is_empty())
+                        && crate::streaming::borrowed_partition_matches(
+                            &source,
+                            expected.as_deref(),
+                            &row,
+                        )
+                    {
+                        return Ok(row
+                            .get("id")
+                            .and_then(BorrowedValue::as_str)
+                            .map(Into::into));
+                    }
                 }
             }
-        }
-        // Only canonical replay constructs errors and handles complex schemas.
-        let mut terminated = Vec::new();
-        let bytes = if final_line {
-            bytes
-        } else {
-            terminated.extend_from_slice(bytes);
-            terminated.push(b'\n');
-            &terminated
+            // Only canonical replay constructs errors and handles complex schemas.
+            let mut terminated = Vec::new();
+            let bytes = if final_line {
+                bytes
+            } else {
+                terminated.extend_from_slice(bytes);
+                terminated.push(b'\n');
+                &terminated
+            };
+            decoder.decode_row(host, formats, file, bytes).map(|_| None)
         };
-        decoder.decode_row(host, formats, file, bytes).map(|_| ())
-    };
     // Append can build membership without validating payloads. Validate such
     // scopes before locator errors, preserving validation-before-duplicate
     // precedence. First-use builds still fuse the two scans.
     let prevalidated = sources.lazy[collection].stream.index.ids.is_some();
     if prevalidated {
-        for (path, (generation, _)) in &needed {
+        for (path, generation) in &needed {
             rows::visit_lines(
                 host,
                 path,
                 0,
                 generation.covered_len,
                 0,
-                |bytes, _, final_line| validate_line(path, bytes, final_line),
+                |bytes, _, final_line| validate_line(path, bytes, final_line).map(|_| ()),
             )?;
         }
     }
@@ -567,10 +600,11 @@ fn lookup(
     let candidates = {
         let mut visit = |path: &str, bytes: &[u8], location: RowLocation, final_line: bool| {
             if !prevalidated && needed.contains_key(path) {
-                validate_line(path, bytes, final_line)?;
+                let id = validate_line(path, bytes, final_line)?;
                 visited.entry(path.into()).or_insert(location.offset);
+                return Ok(id);
             }
-            Ok(())
+            Ok(None)
         };
         sources
             .lazy
@@ -578,15 +612,12 @@ fn lookup(
             .expect("lazy collection")
             .stream
             .index
-            .id_locator_visiting(host, &paths, &mut visit)
+            .id_locator_observed_decoded(host, &paths, &observed, &mut visit)
             .and_then(|locator| locator.locate(id))
             .map_err(|error| contextualize(error, &source))?
     };
-    for (path, (generation, prefix)) in &needed {
-        let covered = prevalidated
-            || visited
-                .get(path)
-                .is_some_and(|start| *start == 0 || prefix.is_some_and(|prefix| *start <= prefix));
+    for (path, generation) in &needed {
+        let covered = prevalidated || visited.get(path) == Some(&0);
         if !covered {
             rows::visit_lines(
                 host,
@@ -594,7 +625,7 @@ fn lookup(
                 0,
                 generation.covered_len,
                 0,
-                |bytes, _, final_line| validate_line(path, bytes, final_line),
+                |bytes, _, final_line| validate_line(path, bytes, final_line).map(|_| ()),
             )?;
         }
         if generation.check(host)? != GenerationCheck::Unchanged {
@@ -604,7 +635,7 @@ fn lookup(
             ));
         }
     }
-    for (path, (generation, _)) in needed {
+    for (path, generation) in needed {
         sources
             .lazy
             .get_mut(collection)
@@ -876,7 +907,15 @@ mod tests {
             }),
             ..IndexState::default()
         };
-        assert!(index.time_index(&host, path, "at").unwrap().is_none());
+        assert!(index
+            .time_index(
+                &host,
+                path,
+                "at",
+                SourceGeneration::observe(&host, path).unwrap().unwrap()
+            )
+            .unwrap()
+            .is_none());
         let paths = vec![path.to_owned()];
         let candidates = index
             .id_locator(&host, &paths)

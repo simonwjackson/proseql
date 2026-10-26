@@ -63,6 +63,14 @@ impl<'a> SimpleDecoder<'a> {
         &'de self,
         bytes: &'de [u8],
     ) -> Result<Option<BorrowedValue<'de>>, serde_json::Error> {
+        self.decode_positioned(bytes)
+            .map(|row| row.map(|(value, _)| value))
+    }
+    /// Returns the compact row and its schema-field presence mask together.
+    pub fn decode_positioned<'de>(
+        &'de self,
+        bytes: &'de [u8],
+    ) -> Result<Option<(BorrowedValue<'de>, u128)>, serde_json::Error> {
         let mut decoder = serde_json::Deserializer::from_slice(bytes);
         let mut value = RowSeed(self).deserialize(&mut decoder)?;
         decoder.end()?;
@@ -87,7 +95,7 @@ impl<'a> SimpleDecoder<'a> {
             index += 1;
             keep
         });
-        Ok(Some(value.0))
+        Ok(Some(value))
     }
 }
 struct RowSeed<'a>(&'a SimpleDecoder<'a>);

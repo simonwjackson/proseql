@@ -31,6 +31,7 @@ use crate::{
 use super::{
     borrowed::BorrowedValue,
     fold::{Fold as AggregateAccumulator, GroupFold as GroupedAggregateAccumulator},
+    plan::{Field, Filter, PositionedRow},
 };
 
 pub enum ScanRequest<'a> {
@@ -50,6 +51,8 @@ pub struct Executor<'a> {
     registry: Arc<CallbackRegistry>,
     order: Option<CandidateOrder>,
     borrowed_ranks: Option<Vec<(usize, Vec<Value>)>>,
+    rank_fields: Vec<Field>,
+    positioned_filter: Option<Filter>,
     workspace: Workspace<'a>,
     deferred_error: Option<EngineError>,
     pub candidate_rows: usize,
@@ -250,7 +253,7 @@ impl<'a> Executor<'a> {
             }
             ScanRequest::Aggregate(_, config) => Workspace::Aggregate {
                 config,
-                accumulator: AggregateAccumulator::new(config),
+                accumulator: AggregateAccumulator::new(config, Some(&collection.descriptor.schema)),
                 deferred: (search || reorders).then(Vec::new),
             },
             ScanRequest::Grouped(_, group_by, config) => {
@@ -269,7 +272,13 @@ impl<'a> Executor<'a> {
                     group_by,
                     config,
                     accumulators: (0..count)
-                        .map(|_| GroupedAggregateAccumulator::new(group_by, config))
+                        .map(|_| {
+                            GroupedAggregateAccumulator::new(
+                                group_by,
+                                config,
+                                Some(&collection.descriptor.schema),
+                            )
+                        })
                         .collect(),
                     deferred: (search || (reorders && !disjoint)).then(Vec::new),
                 }
@@ -291,8 +300,24 @@ impl<'a> Executor<'a> {
                 })
                 .collect::<Option<Vec<_>>>()
         });
+        let positioned_filter = input
+            .r#where
+            .as_ref()
+            .map(|filter| Filter::new(filter, Some(&collection.descriptor.schema)));
+        let rank_fields = order
+            .as_ref()
+            .map(|order| {
+                order
+                    .fields()
+                    .iter()
+                    .map(|field| Field::new(field, Some(&collection.descriptor.schema)))
+                    .collect()
+            })
+            .unwrap_or_default();
         Ok(Self {
             input,
+            positioned_filter,
+            rank_fields,
             registry,
             order,
             borrowed_ranks,
@@ -305,6 +330,18 @@ impl<'a> Executor<'a> {
     /// Borrowed scalar fast path. Unsupported operators/sort callbacks retain
     /// the canonical path, after the host has validated the complete row.
     pub fn push_borrowed(&mut self, row: &BorrowedValue<'_>, ordinal: u64) {
+        self.push_borrowed_inner(row, ordinal, None);
+    }
+    /// Only rows from SimpleDecoder::decode_positioned may use this layout.
+    pub fn push_positioned(&mut self, row: &BorrowedValue<'_>, present: u128, ordinal: u64) {
+        self.push_borrowed_inner(row, ordinal, Some(present));
+    }
+    fn push_borrowed_inner(
+        &mut self,
+        row: &BorrowedValue<'_>,
+        ordinal: u64,
+        present: Option<u128>,
+    ) {
         // Ordered-sort eligibility observes all rows, including equality
         // candidates that do not match. Sort workspaces own their candidates.
         if matches!(&self.workspace, Workspace::Query { sort, .. } if !sort.is_empty()) {
@@ -315,9 +352,16 @@ impl<'a> Executor<'a> {
             (Some(order), Some(ranks)) => ranks
                 .iter()
                 .find(|(_, values)| {
-                    order.fields().iter().zip(values).all(|(field, value)| {
-                        row.get(field).is_some_and(|cell| cell.scalar_eq(value))
-                    })
+                    order
+                        .fields()
+                        .iter()
+                        .zip(&self.rank_fields)
+                        .zip(values)
+                        .all(|((name, field), value)| {
+                            present
+                                .map_or_else(|| row.get(name), |present| field.get(row, present))
+                                .is_some_and(|cell| cell.scalar_eq(value))
+                        })
                 })
                 .map(|(rank, _)| *rank),
             (None, _) => Some(0),
@@ -330,12 +374,21 @@ impl<'a> Executor<'a> {
             self.candidate_rows += 1;
             return;
         };
-        let matched = match self
-            .input
-            .r#where
-            .as_ref()
-            .map_or(Some(true), |filter| row.matches_where(filter))
-        {
+        let matched = match present.map_or_else(
+            || {
+                self.input
+                    .r#where
+                    .as_ref()
+                    .map_or(Some(true), |filter| row.matches_where(filter))
+            },
+            |present| {
+                self.positioned_filter
+                    .as_ref()
+                    .map_or(Some(true), |filter| {
+                        filter.matches(&PositionedRow { row, present })
+                    })
+            },
+        ) {
             Some(matched) => matched,
             None => {
                 self.push(&row.to_owned(), ordinal);
@@ -351,14 +404,20 @@ impl<'a> Executor<'a> {
                 accumulator,
                 deferred: None,
                 ..
-            } => accumulator.push(row),
+            } => match present {
+                Some(present) => accumulator.push(&PositionedRow { row, present }),
+                None => accumulator.push(row),
+            },
             Workspace::Grouped {
                 accumulators,
                 deferred: None,
                 ..
             } => {
                 let index = if accumulators.len() > 1 { rank } else { 0 };
-                accumulators[index].push(row);
+                match present {
+                    Some(present) => accumulators[index].push(&PositionedRow { row, present }),
+                    None => accumulators[index].push(row),
+                }
             }
             Workspace::Query {
                 rows: Rows::Top { ranked, natural },

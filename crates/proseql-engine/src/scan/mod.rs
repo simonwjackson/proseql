@@ -123,6 +123,7 @@ pub mod executor;
 pub mod field;
 mod fold;
 pub mod framer;
+mod plan;
 
 #[cfg(test)]
 mod tests {

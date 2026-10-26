@@ -9,11 +9,16 @@ use std::{
 
 use serde_json::{Map, Value};
 
-use super::borrowed::BorrowedValue;
+use super::{
+    borrowed::BorrowedValue,
+    plan::{Field, PositionedRow},
+};
+use crate::descriptor::SchemaNode;
 use crate::query::{
     aggregate::{AggregateConfig, AggregateResult, GroupResult},
     filter::get_nested_value,
 };
+use std::sync::Arc;
 
 #[derive(Clone, Copy)]
 pub(super) enum Cell<'a> {
@@ -91,21 +96,49 @@ impl Cell<'_> {
     }
 }
 pub(super) trait Row {
-    fn cell(&self, field: &str) -> Option<Cell<'_>>;
+    fn cell(&self, field: &Field) -> Option<Cell<'_>>;
 }
 impl Row for Value {
-    fn cell(&self, field: &str) -> Option<Cell<'_>> {
-        get_nested_value(self, field).map(Cell::Owned)
+    fn cell(&self, field: &Field) -> Option<Cell<'_>> {
+        get_nested_value(self, &field.name).map(Cell::Owned)
     }
 }
 impl Row for BorrowedValue<'_> {
-    fn cell(&self, field: &str) -> Option<Cell<'_>> {
-        self.get(field).map(Cell::Borrowed)
+    fn cell(&self, field: &Field) -> Option<Cell<'_>> {
+        self.get(&field.name).map(Cell::Borrowed)
+    }
+}
+impl Row for PositionedRow<'_> {
+    fn cell(&self, field: &Field) -> Option<Cell<'_>> {
+        field.get(self.row, self.present).map(Cell::Borrowed)
+    }
+}
+struct FoldFields([Vec<(Field, usize)>; 4]);
+impl FoldFields {
+    fn new(config: &AggregateConfig, schema: Option<&SchemaNode>) -> Self {
+        Self(
+            [&config.sum, &config.avg, &config.min, &config.max].map(|fields| {
+                fields
+                    .iter()
+                    .enumerate()
+                    .map(|(index, name)| {
+                        (
+                            Field::new(name, schema),
+                            fields
+                                .iter()
+                                .position(|field| field == name)
+                                .unwrap_or(index),
+                        )
+                    })
+                    .collect()
+            }),
+        )
     }
 }
 
 pub(super) struct Fold<'a> {
     config: &'a AggregateConfig,
+    fields: Arc<FoldFields>,
     count: u64,
     sum: Vec<f64>,
     avg: Vec<(f64, u64)>,
@@ -113,9 +146,13 @@ pub(super) struct Fold<'a> {
     max: Vec<Option<Value>>,
 }
 impl<'a> Fold<'a> {
-    pub fn new(config: &'a AggregateConfig) -> Self {
+    pub fn new(config: &'a AggregateConfig, schema: Option<&SchemaNode>) -> Self {
+        Self::with_fields(config, Arc::new(FoldFields::new(config, schema)))
+    }
+    fn with_fields(config: &'a AggregateConfig, fields: Arc<FoldFields>) -> Self {
         Self {
             config,
+            fields,
             count: 0,
             sum: vec![0.0; config.sum.len()],
             avg: vec![(0.0, 0); config.avg.len()],
@@ -129,49 +166,33 @@ impl<'a> Fold<'a> {
         }
         // The canonical accumulator uses a map per configured field: repeated
         // field names accumulate repeatedly into that same slot.
-        for (index, field) in self.config.sum.iter().enumerate() {
+        for (field, first) in &self.fields.0[0] {
             if let Some(value) = row.cell(field).and_then(Cell::number) {
-                let first = self
-                    .config
-                    .sum
-                    .iter()
-                    .position(|name| name == field)
-                    .unwrap_or(index);
-                self.sum[first] += value;
+                self.sum[*first] += value;
             }
         }
-        for (index, field) in self.config.avg.iter().enumerate() {
+        for (field, first) in &self.fields.0[1] {
             if let Some(value) = row.cell(field).and_then(Cell::number) {
-                let first = self
-                    .config
-                    .avg
-                    .iter()
-                    .position(|name| name == field)
-                    .unwrap_or(index);
-                self.avg[first].0 += value;
-                self.avg[first].1 += 1;
+                self.avg[*first].0 += value;
+                self.avg[*first].1 += 1;
             }
         }
         for (fields, slots, minimum) in [
-            (&self.config.min, &mut self.min, true),
-            (&self.config.max, &mut self.max, false),
+            (&self.fields.0[2], &mut self.min, true),
+            (&self.fields.0[3], &mut self.max, false),
         ] {
-            for (index, field) in fields.iter().enumerate() {
+            for (field, first) in fields {
                 let Some(value) = row.cell(field).filter(|value| !value.is_null()) else {
                     continue;
                 };
-                let first = fields
-                    .iter()
-                    .position(|name| name == field)
-                    .unwrap_or(index);
-                if slots[first].as_ref().is_none_or(|current| {
+                if slots[*first].as_ref().is_none_or(|current| {
                     if minimum {
                         value.compare(current) < 0
                     } else {
                         value.compare(current) > 0
                     }
                 }) {
-                    slots[first] = Some(value.owned());
+                    slots[*first] = Some(value.owned());
                 }
             }
         }
@@ -229,13 +250,15 @@ impl<'a> Fold<'a> {
 
 pub(super) struct GroupFold<'a> {
     fields: &'a [String],
+    positions_fields: Vec<Field>,
+    fold_fields: Arc<FoldFields>,
     config: &'a AggregateConfig,
     positions: HashMap<u64, Vec<usize>>,
     groups: Vec<(Vec<u8>, Fold<'a>)>,
     scalar_keys: Vec<Option<Vec<Option<Value>>>>,
     recent: [Option<usize>; 2],
 }
-fn write_key(row: &impl Row, fields: &[String], writer: &mut impl Write) {
+fn write_key(row: &impl Row, fields: &[Field], writer: &mut impl Write) {
     for (index, field) in fields.iter().enumerate() {
         if index > 0 {
             writer.write_all(b"\0").expect("group separator");
@@ -277,9 +300,15 @@ impl Write for CompareWriter<'_> {
     }
 }
 impl<'a> GroupFold<'a> {
-    pub fn new(fields: &'a [String], config: &'a AggregateConfig) -> Self {
+    pub fn new(
+        fields: &'a [String],
+        config: &'a AggregateConfig,
+        schema: Option<&SchemaNode>,
+    ) -> Self {
         Self {
             fields,
+            positions_fields: fields.iter().map(|name| Field::new(name, schema)).collect(),
+            fold_fields: Arc::new(FoldFields::new(config, schema)),
             config,
             positions: HashMap::new(),
             groups: Vec::new(),
@@ -293,20 +322,21 @@ impl<'a> GroupFold<'a> {
         // twice per row. Numbers/objects retain canonical JSON-key semantics.
         for index in self.recent.into_iter().flatten() {
             if self.scalar_keys[index].as_ref().is_some_and(|key| {
-                self.fields.iter().zip(key).all(|(field, expected)| {
-                    match (row.cell(field), expected) {
+                self.positions_fields
+                    .iter()
+                    .zip(key)
+                    .all(|(field, expected)| match (row.cell(field), expected) {
                         (None, None) => true,
                         (Some(value), Some(expected)) => value.matches_scalar_key(expected),
                         _ => false,
-                    }
-                })
+                    })
             }) {
                 self.groups[index].1.push(row);
                 return;
             }
         }
         let mut writer = HashWriter(std::collections::hash_map::DefaultHasher::new());
-        write_key(row, self.fields, &mut writer);
+        write_key(row, &self.positions_fields, &mut writer);
         let hash = writer.0.finish();
         let found = self.positions.get(&hash).and_then(|positions| {
             positions.iter().copied().find(|index| {
@@ -315,16 +345,16 @@ impl<'a> GroupFold<'a> {
                     position: 0,
                     equal: true,
                 };
-                write_key(row, self.fields, &mut writer);
+                write_key(row, &self.positions_fields, &mut writer);
                 writer.equal && writer.position == writer.expected.len()
             })
         });
         let index = found.unwrap_or_else(|| {
             let mut key = Vec::new();
-            write_key(row, self.fields, &mut key);
+            write_key(row, &self.positions_fields, &mut key);
             let index = self.groups.len();
             let scalar_key = self
-                .fields
+                .positions_fields
                 .iter()
                 .map(|field| match row.cell(field) {
                     None => Some(None),
@@ -332,7 +362,10 @@ impl<'a> GroupFold<'a> {
                 })
                 .collect();
             self.scalar_keys.push(scalar_key);
-            self.groups.push((key, Fold::new(self.config)));
+            self.groups.push((
+                key,
+                Fold::with_fields(self.config, Arc::clone(&self.fold_fields)),
+            ));
             self.positions.entry(hash).or_default().push(index);
             index
         });
@@ -399,8 +432,8 @@ mod tests {
             ..Default::default()
         };
         let expected = crate::query::aggregate::compute_grouped_aggregates(&rows, &fields, &config);
-        let mut owned = GroupFold::new(&fields, &config);
-        let mut borrowed = GroupFold::new(&fields, &config);
+        let mut owned = GroupFold::new(&fields, &config, None);
+        let mut borrowed = GroupFold::new(&fields, &config, None);
         for row in &rows {
             owned.push(row);
             let text = serde_json::to_string(row).unwrap();
