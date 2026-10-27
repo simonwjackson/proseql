@@ -1,10 +1,12 @@
 # Round 4: disposable native streaming indexes
 
+**Correction after rv4:** the original code did not preserve duplicate/error parity in two growth cases and could panic on crafted time counters. The fixes and fresh single-trial measurements are in the rv4 follow-up below. Earlier timing tables remain historical evidence, not correctness qualification of that code.
+
 **Saved indexes reduce cold point and append latency. All eight measured wall-time targets still miss.** Fresh open/idle RSS passes SQLite +20 MiB. Post-append RSS remains a separate miss. No target or text durability rule changes.
 
 ## Source and method
 
-Runtime: `81951f9a8f08eeababd95c59a8d61d0efc4e4820`, including the reproduced validation-precedence fix. Base: `1dfbce5`. Only documentation, numeric evidence and Python formatting follow that runtime commit. [Numeric cells](query-while-scanning-persist-round4.json) and [binary hashes/toolchain](query-while-scanning-persist-round4-provenance.txt) accompany this report.
+Runtime: `81951f9a8f08eeababd95c59a8d61d0efc4e4820`, including the reproduced validation-precedence fix. Base: `1dfbce5`. This is the pre-review measurement source. The rv4 fixes below supersede its correctness claims. [Numeric cells](query-while-scanning-persist-round4.json) and [binary hashes/toolchain](query-while-scanning-persist-round4-provenance.txt) accompany this report.
 
 Everything compiled and ran on **aka**, with native `RUSTFLAGS='-C target-cpu=x86-64-v2'`, through `scripts/qws/aka-run persist`. No WASM build, rakku/yari access, real data, push, GitHub action or deployment ran. The parent owns combined release-check and WASM/browser qualification.
 
@@ -90,3 +92,32 @@ Verified on aka at x86-64-v2:
 Earlier local test/setup errors (constructor/config-field typos, an error-conversion type, and a clippy type alias/multiple-of lint) were corrected and rerun; none are waived. Only Git, reading and editing ran on zao. No full workspace suite ran.
 
 All owned synthetic data, copied trials and SQLite temporary files under `/home/simonwjackson/work/qws-harness-data/persist` were removed. Absence was checked twice (`PERSIST_DATA_CLEANED True`, `FINAL_DATA_ABSENT`). Small logs/numeric evidence remain at `/home/simonwjackson/work/qws-persist-results`; the source checkout and Cargo build cache remain. Real consumer deployment, real-data/Celeron qualification, independent review and all missed speed/retention targets remain open.
+
+## rv4 review follow-up
+
+Reviewed failures reproduced on aka before fixing them:
+
+1. An ordered appended row reused a prefix ID. A February 3 read returned two rows with its grown time sidecar, but the canonical full scan returned the unique-ID `SourceConfigError`.
+2. A valid sidecar covered an older prefix than the saved ID locator. Appending an invalid January row, publishing membership with a March create, then adding a cross-partition duplicate made the cache report the duplicate before payload validation. Removing sidecars reported the payload `ValidationError`.
+3. A checksummed time payload with `rows = u64::MAX` and a valid resume offset panicked in the framer on one appended row. Additional cases covered zero stride, missing/inconsistent checkpoints, duplicate or reversed ID locations and oversized ID counts.
+
+Runtime fix source: `3c398915fa22ad252b0227a017bb11e9f4eb7a09` (with `dd60999`). Native time loading now declines grown sidecars and rebuilds canonically, rather than assuming that payload-valid suffix rows are unique against the prefix. Cached ID membership is usable in a validating build only when validation coverage reaches its whole cached prefix; otherwise the file is scanned and the uncovered gap validated before duplicate merging.
+
+Time row counts are bounded by text length. Checkpoint count, stride, row positions, offsets, ordering and last-key state must be consistent before traversal. ID counts/ordinals/offsets receive matching bounds and consistency checks. Traversal, count increments, global ordinals and accepted append counts use checked arithmetic. Bad metadata is a cache miss. Index version **2** rejects earlier artifacts, including false validation proofs that the old time-growth path could have published. The first use of a version-1 cache therefore rebuilds once from text.
+
+All three reproducers are permanent regression tests. On aka, focused storage library/`streaming_*` tests pass **50 / 0 failed / 4 ignored**; native all-feature library/`streaming_*` tests pass **104 / 0 failed / 6 ignored**. Crash parents invoke their ignored children. Native/storage all-target/all-feature clippy `-D warnings` and scoped fmt pass. The release acceptance binary/example rebuild and Python Ruff check/format pass. No full release-check ran.
+
+### One remeasurement of each target row
+
+[rv4 numeric evidence](query-while-scanning-persist-round4-rv4.json), [binary hashes](query-while-scanning-persist-round4-rv4-provenance.txt). Same aka scalar x86-64-v2 fixture, durability, cold/warm helpers, fresh sidecar-bearing process and 1 GiB/no-swap scopes as above. `PERSIST_REPEATS=1 PERSIST_WORKLOADS=point,append` runs exactly one timing trial per shape/workload/mode/cache cell: **24 trials**, including SQLite and missing-sidecar controls. All answers match; all **12 append trials** persist exactly 1,000 rows. Maximum sampled one-minute load was **0.9780**, below 2. These are single observations, **not medians or regression qualification**. All eight latency targets still miss. The measured value is this rerun's observed floor; no physical lower bound or target reduction is claimed.
+
+| Workload, ms C/W | Missing sidecars | Saved sidecars | SQLite | Target C/W |
+|---|---:|---:|---:|---|
+| Point, samples | 509.416 / 0.124 | 48.311 / 0.096 | 1.063 / 0.035 | miss / miss, ≤2× |
+| Point, raw | 638.784 / 1.117 | 107.045 / 0.753 | 1.145 / 0.026 | miss / miss, ≤2× |
+| Append, samples | 355.519 / 302.057 | 94.559 / 74.004 | 11.176 / 7.954 | miss / miss, ≤1× |
+| Append, raw | 719.182 / 578.754 | 520.832 / 329.963 | 11.165 / 8.217 | miss / miss, ≤1× |
+
+The miss reasons and next steps remain those in the wall-time table above: whole-locator reconstruction/global checks for point lookup; baseline reads, prefix proofs and synchronized file fanout for append. Extra counter validation does not eliminate those costs. Grown external time files now deliberately pay a canonical full scan; incremental reuse needs an explicit identity-uniqueness proof, not only payload validation.
+
+Measured disk sizes remain 15,853,064 / 16,706,280 logical bytes and 15,917,056 / 18,575,360 allocated bytes samples/raw. Fresh open/idle was not remeasured in this four-target-only pass. All owned fixture/SQLite/temp data was removed; `PERSIST_DATA_CLEANED True` and `RV4_DATA_ABSENT` verified absence. Source hashes match the measured source. Only helper configuration and documentation follow the measured runtime. No push or GitHub comment ran.

@@ -15,7 +15,12 @@ m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m)
 assert os.uname().nodename.split(".")[0] == "aka"
 data = Path("/home/simonwjackson/work/qws-harness-data/persist")
-out = Path("/home/simonwjackson/work/qws-persist-results")
+out = Path(
+    os.environ.get("PERSIST_RESULTS", "/home/simonwjackson/work/qws-persist-results")
+)
+repeats = int(os.environ.get("PERSIST_REPEATS", "3"))
+workloads = os.environ.get("PERSIST_WORKLOADS", "point,append,open,idle").split(",")
+assert repeats > 0 and all(w in ("point", "append", "open", "idle") for w in workloads)
 out.mkdir(exist_ok=True)
 data.mkdir(parents=True, exist_ok=True)
 (data / "tmp").mkdir(exist_ok=True)
@@ -67,9 +72,9 @@ try:
         }
         for kind in ("samples", "raw")
     }
-    for repeat in range(3):
+    for repeat in range(repeats):
         for kind in ("samples", "raw"):
-            for workload in ("point", "append", "open", "idle"):
+            for workload in workloads:
                 if repeat and workload in ("open", "idle"):
                     continue
                 modes = ["sqlite", "missing", "sidecars"]
@@ -131,7 +136,7 @@ try:
                             shutil.rmtree(root)
     summaries = []
     for kind in ("samples", "raw"):
-        for workload in ("point", "append", "open", "idle"):
+        for workload in workloads:
             for mode in ("sqlite", "missing", "sidecars"):
                 for cache in ("cold", "warm"):
                     cell = [
