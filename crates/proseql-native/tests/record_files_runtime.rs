@@ -598,3 +598,74 @@ fn managed_watch_finds_missing_relative_and_nested_relative_roots() {
         assert!(status.success(), "failed for {root}");
     }
 }
+
+#[test]
+fn empty_record_roots_cannot_overlap_any_existing_source_kind() {
+    use proseql_storage::source_config::{
+        CollectionFileSourceConfig, DocumentGraphFragmentErrorPolicy, DocumentGraphRootConfig,
+        DocumentGraphSourceConfig, DocumentSourceConfig, PartitionKey, PartitionedSourceConfig,
+        SourceCollectionSelection, UnknownCollectionPolicy,
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().to_string_lossy().into_owned();
+    let sources = vec![
+        DatabaseSourceConfig::CollectionFile(CollectionFileSourceConfig {
+            id: "other".into(),
+            collection: "other".into(),
+            path: dir.path().join("a.json").to_string_lossy().into_owned(),
+            format: Some("json".into()),
+            prose: None,
+        }),
+        DatabaseSourceConfig::Partitioned(PartitionedSourceConfig {
+            id: "other".into(),
+            collection: "other".into(),
+            root: root.clone(),
+            format: "json".into(),
+            partition_by: PartitionKey::Field {
+                field: "text".into(),
+            },
+            prose: None,
+        }),
+        DatabaseSourceConfig::Documents(DocumentSourceConfig {
+            id: "other".into(),
+            root: root.clone(),
+            include: Some(vec!["**/*.json".into()]),
+            exclude: vec![],
+            format: Some("json".into()),
+            collections: Some(SourceCollectionSelection::Named(vec!["other".into()])),
+            unknown_collections: UnknownCollectionPolicy::Error,
+            outbox: "generated.json".into(),
+            optional: true,
+        }),
+        DatabaseSourceConfig::DocumentGraph(DocumentGraphSourceConfig {
+            id: "other".into(),
+            roots: vec![DocumentGraphRootConfig {
+                id: None,
+                root: root.clone(),
+                optional: true,
+                include: Some(vec!["**/*.json".into()]),
+                exclude: vec![],
+                collections: None,
+            }],
+            collections: Some(SourceCollectionSelection::Named(vec!["other".into()])),
+            include: None,
+            exclude: vec![],
+            transform_callback_id: None,
+            on_fragment_error: DocumentGraphFragmentErrorPolicy::Error,
+        }),
+    ];
+    for source in sources {
+        let mut cfg = config(dir.path());
+        let mut other = cfg.collections[0].clone();
+        other.descriptor.name = "other".into();
+        cfg.collections.push(other);
+        cfg.sources.push(source);
+        let error = NativeRuntime::open_sources_with_options(cfg, options())
+            .err()
+            .unwrap();
+        assert!(
+            error.to_string().contains("overlaps another source"),
+            "{error}"
+        );
+    }
+}
