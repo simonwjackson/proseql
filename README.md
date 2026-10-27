@@ -41,7 +41,9 @@ your-project/
 
 Native Rust applications can also use [RecordFiles](docs/native-sources.md#one-file-per-record-native-recordfiles)
 for flat, stem-keyed `<root>/<id>.<format>` storage with selective durable writes,
-durable deletes, and accepted record-level external reload callbacks.
+durable deletes, and accepted record-level external reload callbacks. The optional
+[`proseql-vcf`](crates/proseql-vcf/README.md) crate adds exact-raw vCard 3.0/4.0
+storage and parsed query fields without adding a parser to the core crates.
 
 ## Install
 

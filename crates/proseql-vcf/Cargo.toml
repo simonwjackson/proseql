@@ -1,0 +1,18 @@
+[package]
+name = "proseql-vcf"
+version = "0.1.0"
+edition = "2021"
+description = "Optional raw-preserving vCard 3.0/4.0 codec for proseQL"
+license = "MIT"
+
+[dependencies]
+calcard = { version = "=0.3.13", default-features = false }
+serde_json = { workspace = true }
+proseql-formats = { path = "../proseql-formats" }
+proseql-engine = { path = "../proseql-engine" }
+
+[dev-dependencies]
+proseql-native = { path = "../proseql-native" }
+proseql-storage = { path = "../proseql-storage" }
+tempfile = { workspace = true }
+sha2 = "0.10"

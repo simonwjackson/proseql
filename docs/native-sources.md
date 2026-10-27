@@ -47,7 +47,7 @@ Creates and updates replace only changed files. Deletes unlink their file and
 sync the containing directory. No-op updates, unchanged records, flush, and close
 write nothing. All encoding, registry write checks, removal capability checks,
 and source-generation conflict checks finish before the first durable operation.
-An external edit since load refuses writes/removals; this is not cross-process
+An external edit to a target since load refuses writes/removals; this is not cross-process
 locking. Do not run concurrent writers against one root.
 
 Operations run in sorted path order under the existing prefix-commit rule: there
@@ -57,8 +57,12 @@ and requires reopen/inspection. `DurableStorageHost::preflight_remove_durable`
 and `remove_durable` default to an unsupported error without unlinking. A custom
 host must implement both; removal must unlink then sync the parent before success.
 `FsStorageHost` exposes `RemoveUnlink` (before unlink) and
-`RemoveDirectorySync` (after unlink, before sync) durability fault points.
-`MemoryStorageHost` provides the corresponding in-process behavior.
+`RemoveDirectorySync` (after unlink, before sync) durability fault points. A durable
+replacement also syncs newly created parent directories through their existing
+ancestor; `ParentDirectorySync` exposes that boundary before file replacement.
+`MemoryStorageHost` provides the corresponding in-process behavior. Hosts whose
+`list_directory` output includes directories must implement `StorageHost::is_directory`
+so RecordFiles can ignore them; the default assumes a flat files-only host.
 
 Each collection has one source owner. RecordFiles rejects another flat owner of
 the same root/extension, matching collection-file paths, and overlapping document
@@ -97,6 +101,52 @@ The TypeScript `CollectionConfig.directory` API is retained and uses the same
 physical one-file-per-record layout. Native RecordFiles is separate. This change
 does **not** claim TypeScript parity for durability, stem-derived schemas,
 selective rewrites, or reload details. No TypeScript API is retired.
+
+## Optional vCard codec
+
+The separate [`proseql-vcf`](../crates/proseql-vcf/README.md) crate provides
+`VCardCodec` (`vcf`) and `vcard_schema()`. It uses calcard 0.3.13 for parsing only;
+it is not registered by `FormatRegistry::with_builtins()` and core crates do not
+depend on it. Register it explicitly, set the collection schema to
+`vcard_schema()` and its ID strategy to `DerivedFromKey`, then use RecordFiles
+with `format: "vcf"`. See its complete [native example](../crates/proseql-vcf/examples/native.rs).
+
+The record has exact `raw` plus `version`, optional `uid`, `fn`, structured `n`,
+`nickname`, `emails`, `tels`, structured `adrs` (including `geo`), `related`,
+`categories`, and optional `rev`. Extra scalar arrays `email_values` and
+`localities` support existing `$contains` filters without adding engine operators.
+The crate README specifies the complete canonical shape and missing-field rules.
+Unknown/grouped/X properties survive in `raw`. Exactly one 3.0 or 4.0 card is
+required. Encoding validates and returns only `raw`, without using the parser's
+serializer. The registry exact write check refuses derived-only changes.
+
+Use the supplied struct schema: an open Unknown schema retains automatic engine
+timestamps, which cannot round-trip to raw text. Decode new raw before writes.
+For a replacement that removes optional properties, delete then create the same
+ID in one native mutation; the net plan writes one replacement. Ordinary updates
+merge, so omitted derived properties would otherwise retain old values and fail
+the check. This crate adds no CardDAV, geocoding, or TypeScript API.
+
+### Measured scale (synthetic, warm files)
+
+The ignored `proseql-vcf/tests/scale.rs` test was explicitly run with:
+
+```sh
+nix develop --command cargo test --manifest-path crates/Cargo.toml -p proseql-vcf --release --test scale -- --ignored --nocapture
+```
+
+| Measurement | Result |
+|---|---|
+| Input | 2,000 synthetic 3.0 cards with folded base64 PHOTO; 400,350,670 bytes total; maximum 200,177 bytes/file |
+| Open | 3,743.862 ms |
+| Full reload after one external edit | 3,769.171 ms |
+| Build | Cargo release, optimized; rustc 1.92.0; calcard 0.3.13 |
+| Environment | NixOS/Linux 6.18.17, x86_64; Intel Core i9-11900H @ 2.50 GHz; 8 logical CPUs exposed; 32,588,472 kB RAM |
+
+This is one warm generated-files run, not a latency guarantee, cold-cache test,
+or peak-memory measurement. Other host work can affect times. No acceptance
+threshold was invented. No real Google export was sourced; checked-in fixtures
+are explicitly synthetic Google-style 3.0 and 4.0 cards, not personal contacts.
 
 ## Source sessions with no idle row cache
 

@@ -5,6 +5,7 @@ members = [
     "proseql-formats",
     "proseql-native",
     "proseql-storage",
+    "proseql-vcf",
     "proseql-wasm",
 ]
 

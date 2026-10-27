@@ -1,0 +1,2 @@
+# These fixtures test exact CRLF preservation, including through Git checkouts.
+*.vcf -text whitespace=cr-at-eol

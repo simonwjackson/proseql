@@ -4,7 +4,7 @@
 }:
 
 # The Rust engine workspace: proseql-engine, proseql-formats, proseql-storage,
-# and the native durable runtime facade.
+# the native durable runtime facade, and the optional raw-preserving vCard codec.
 #
 # A library workspace rather than a program, so the value here is not the
 # artifact but the check -- `cargo test` runs during the build, which is what
@@ -18,6 +18,7 @@ let
     "--package=proseql-formats"
     "--package=proseql-native"
     "--package=proseql-storage"
+    "--package=proseql-vcf"
   ];
 in
 rustPlatform.buildRustPackage {

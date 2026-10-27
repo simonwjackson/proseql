@@ -1,0 +1,21 @@
+BEGIN:VCARD
+VERSION:3.0
+X-PROSEQL-FIXTURE:Synthetic Google-style export; not a personal contact
+FN:Example Person
+N:Person;Example;Middle;Dr.;III
+NICKNAME:Example,Sample\, Friend
+UID:urn:uuid:00000000-0000-0000-0000-000000000003
+EMAIL;TYPE=INTERNET;TYPE=HOME;TYPE=PREF:example@example.invalid
+EMAIL;TYPE=WORK:work@example.invalid
+TEL;TYPE=CELL:+1-202-555-0100
+item1.ADR;TYPE=HOME:PO 7;Apartment 2;10 Example Street;Sampletown;CA;12345;US
+item1.X-ABLabel:_$!<Home>!$_
+item1.GEO:37.123;-122.456
+item2.X-ABRELATEDNAMES:Example Relative
+item2.X-ABLabel:parent
+CATEGORIES:Family,Sample\, Group
+REV:20261027T120000Z
+PHOTO;ENCODING=b;TYPE=JPEG:AQID
+ BA==
+X-UNKNOWN:Keep this exact text
+END:VCARD
