@@ -669,3 +669,33 @@ fn empty_record_roots_cannot_overlap_any_existing_source_kind() {
         );
     }
 }
+
+#[test]
+fn record_files_use_the_shared_schema_encoder_for_transformed_fields() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("a.json"), r#"{"number":"12"}"#).unwrap();
+    let mut cfg = config(dir.path());
+    cfg.collections[0].descriptor.schema = SchemaNode::Struct {
+        fields: vec![StructField {
+            name: "number".into(),
+            schema: SchemaNode::NumFromStr,
+        }],
+    };
+    let runtime = NativeRuntime::open_sources_with_options(cfg.clone(), options()).unwrap();
+    assert_eq!(
+        runtime.find_by_id("records", "a").unwrap().unwrap()["number"],
+        12
+    );
+    runtime
+        .mutate(|db| db.update("records", "a", json!({"number":"13"})))
+        .unwrap();
+    let physical: Value =
+        serde_json::from_slice(&fs::read(dir.path().join("a.json")).unwrap()).unwrap();
+    assert_eq!(physical, json!({"number":"13"}));
+    runtime.close().unwrap();
+    let reopened = NativeRuntime::open_sources_with_options(cfg, options()).unwrap();
+    assert_eq!(
+        reopened.find_by_id("records", "a").unwrap().unwrap()["number"],
+        13
+    );
+}

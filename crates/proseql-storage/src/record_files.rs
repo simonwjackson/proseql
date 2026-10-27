@@ -162,6 +162,15 @@ pub fn plan_record_files(
         if !payload.is_object() {
             return Err(error(source, &path, "RecordFiles requires object payloads"));
         }
+        let payload = crate::persistence::encode_value(&collection.schema, &payload, id).map_err(
+            |cause| {
+                error(
+                    source,
+                    &path,
+                    format!("Cannot encode record at '{path}': {cause}"),
+                )
+            },
+        )?;
         let content = formats
             .serialize(&payload, &source.format, None)
             .map_err(|cause| error(source, &path, format!("Cannot encode '{path}': {cause:?}")))?;
