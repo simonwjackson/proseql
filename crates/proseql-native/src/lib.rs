@@ -1433,6 +1433,9 @@ fn reload_locked(
                 sources.on_record_files_reload.clone(),
             )?;
             let accepted_diffs = sources.record_reload_diff(&next);
+            // Finish fallible lazy manifest refresh before accepting eager rows
+            // or their generation baseline. An error must not consume a diff.
+            refresh_lazy_locked(state)?;
             state
                 .database
                 .commit_snapshot_transaction(states_to_records(next.collections()))?;
@@ -1442,7 +1445,7 @@ fn reload_locked(
             }
             state.sources = Some(next);
             diffs = accepted_diffs;
-            return refresh_lazy_locked(state);
+            return Ok(());
         }
         let content = state.host.read(&state.config.path)?;
         if suppress_self_write && state.last_persisted_content.as_deref() == Some(&content) {

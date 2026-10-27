@@ -553,3 +553,48 @@ fn empty_overlapping_owners_are_rejected() {
         }));
     assert!(NativeRuntime::open_sources_with_options(cfg, options()).is_err());
 }
+
+#[test]
+#[ignore = "subprocess-only relative working-directory test"]
+fn relative_missing_root_watch_child() {
+    let root = std::path::PathBuf::from(std::env::var("RECORD_FILES_RELATIVE_ROOT").unwrap());
+    let (send, receive) = std::sync::mpsc::channel();
+    let runtime = NativeRuntime::open_sources_with_host(
+        config(&root),
+        Arc::new(FsStorageHost::new_polling(Duration::from_millis(10)).unwrap()),
+        NativeSourceRuntimeOptions {
+            watch_debounce: Some(Duration::from_millis(10)),
+            on_record_files_reload: Some(Arc::new(move |diff| send.send(diff).unwrap())),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    write(&root, "a", "relative external");
+    assert_eq!(
+        receive.recv_timeout(Duration::from_secs(3)).unwrap().added,
+        vec!["a"]
+    );
+    assert_eq!(
+        runtime.find_by_id("records", "a").unwrap().unwrap()["text"],
+        "relative external"
+    );
+    runtime.close().unwrap();
+}
+#[test]
+fn managed_watch_finds_missing_relative_and_nested_relative_roots() {
+    for root in ["contacts", "nested/contacts"] {
+        let dir = tempfile::tempdir().unwrap();
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "relative_missing_root_watch_child",
+                "--ignored",
+                "--nocapture",
+            ])
+            .current_dir(dir.path())
+            .env("RECORD_FILES_RELATIVE_ROOT", root)
+            .status()
+            .unwrap();
+        assert!(status.success(), "failed for {root}");
+    }
+}

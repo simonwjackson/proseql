@@ -59,7 +59,7 @@ fn options() -> NativeSourceRuntimeOptions {
 }
 // A real filesystem adapter implementing replacement durability only. Removal
 // deliberately uses the trait's safe unsupported defaults.
-struct ReplaceOnly(FsStorageHost);
+struct ReplaceOnly(FsStorageHost, Option<std::sync::atomic::AtomicUsize>);
 impl StorageHost for ReplaceOnly {
     fn read(&self, p: &str) -> Result<String, EngineError> {
         self.0.read(p)
@@ -80,6 +80,20 @@ impl StorageHost for ReplaceOnly {
         self.0.ensure_dir(p)
     }
     fn list_directory(&self, p: &str) -> Result<Vec<String>, EngineError> {
+        if p.ends_with("/lazy")
+            && self
+                .1
+                .as_ref()
+                .is_some_and(|count| count.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 2)
+        {
+            return Err(EngineError::Operation(
+                proseql_engine::errors::OperationError {
+                    operation: "listing".into(),
+                    reason: "injected".into(),
+                    message: "Third lazy listing refused".into(),
+                },
+            ));
+        }
         self.0.list_directory(p)
     }
     fn list_recursive(&self, p: &str) -> Result<Vec<String>, EngineError> {
@@ -112,6 +126,7 @@ fn unsupported_removal_refuses_before_earlier_sorted_replacement() {
     std::fs::write(dir.path().join("z.json"), "{\"text\":\"last\"}").unwrap();
     let host = Arc::new(ReplaceOnly(
         FsStorageHost::new_polling(Duration::from_secs(2)).unwrap(),
+        None,
     ));
     assert!(host
         .remove_durable(dir.path().join("z.json").to_str().unwrap())
@@ -248,5 +263,68 @@ fn orphan_backup_restores_a_missing_destination_before_discovery() {
     assert_eq!(
         runtime.find_by_id("items", "a").unwrap().unwrap()["text"],
         "old"
+    );
+}
+
+#[test]
+fn lazy_refresh_error_does_not_consume_unaccepted_record_reload_diff() {
+    use proseql_native::{FullScanPolicy, LazyPartitionPolicy};
+    use proseql_storage::source_config::{PartitionKey, PartitionedSourceConfig};
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("records");
+    let lazy_root = dir.path().join("lazy");
+    std::fs::create_dir(&root).unwrap();
+    std::fs::create_dir(&lazy_root).unwrap();
+    std::fs::write(root.join("a.json"), r#"{"text":"old"}"#).unwrap();
+    std::fs::write(
+        lazy_root.join("one.jsonl"),
+        "{\"id\":\"l\",\"group\":\"one\"}\n",
+    )
+    .unwrap();
+    let mut cfg = config(&root);
+    let mut descriptor = cfg.collections[0].descriptor.clone();
+    descriptor.name = "logs".into();
+    descriptor.append_only = true;
+    descriptor.id_strategy = IdStrategy::Provided;
+    cfg.collections
+        .push(NativeCollectionConfig::new(descriptor));
+    cfg.sources
+        .push(DatabaseSourceConfig::Partitioned(PartitionedSourceConfig {
+            id: "logs".into(),
+            collection: "logs".into(),
+            root: lazy_root.to_string_lossy().into_owned(),
+            format: "jsonl".into(),
+            partition_by: PartitionKey::Field {
+                field: "group".into(),
+            },
+            prose: None,
+        }));
+    let (send, receive) = std::sync::mpsc::channel();
+    let mut opts = options();
+    opts.lazy_partitions.insert(
+        "logs".into(),
+        LazyPartitionPolicy {
+            max_loaded_partitions: 0,
+            full_scan: FullScanPolicy::Allow,
+        },
+    );
+    opts.on_record_files_reload = Some(Arc::new(move |diff| send.send(diff).unwrap()));
+    let host = Arc::new(ReplaceOnly(
+        FsStorageHost::new_polling(Duration::from_secs(2)).unwrap(),
+        Some(std::sync::atomic::AtomicUsize::new(0)),
+    ));
+    let runtime = NativeRuntime::open_sources_with_host(cfg, host, opts).unwrap();
+    std::fs::write(root.join("a.json"), r#"{"text":"changed"}"#).unwrap();
+    assert!(runtime.reload().is_err());
+    assert_eq!(
+        runtime.find_by_id("items", "a").unwrap().unwrap()["text"],
+        "old"
+    );
+    assert!(receive.try_recv().is_err());
+    runtime.reload().unwrap();
+    assert_eq!(receive.recv().unwrap().changed, vec!["a"]);
+    assert_eq!(
+        runtime.find_by_id("items", "a").unwrap().unwrap()["text"],
+        "changed"
     );
 }

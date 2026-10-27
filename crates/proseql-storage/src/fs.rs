@@ -1007,6 +1007,10 @@ impl StorageHost for FsStorageHost {
     }
 
     fn exists(&self, path: &str) -> Result<bool, EngineError> {
+        // Directory roots (notably `.` and `/`) have no replacement artifacts.
+        if self.is_directory(path)? {
+            return Ok(true);
+        }
         self.recover_durable_path(path)?;
         Ok(Path::new(path).exists())
     }

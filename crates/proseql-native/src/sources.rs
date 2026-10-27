@@ -1179,7 +1179,13 @@ impl SourceState {
             while !host.exists(root)? {
                 *root = std::path::Path::new(root)
                     .parent()
-                    .filter(|path| !path.as_os_str().is_empty())
+                    .map(|path| {
+                        if path.as_os_str().is_empty() {
+                            std::path::Path::new(".")
+                        } else {
+                            path
+                        }
+                    })
                     .ok_or_else(|| {
                         crate::operation_error("watch-root", "No existing source ancestor to watch")
                     })?
