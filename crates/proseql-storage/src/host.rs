@@ -25,8 +25,9 @@ pub trait WatchHandle: Send + Sync {
 ///
 /// Paths are host-owned identifiers. Use one consistent representation for
 /// reads, listings and events; listings contain complete file paths, not bare
-/// names. `list_directory` lists immediate files and `list_recursive` lists all
-/// descendant files. Neither includes directories. `ensure_dir` receives a
+/// names. `list_directory` lists immediate entries (including directories), and
+/// `list_recursive` lists descendant files. Use `is_directory` to distinguish
+/// entries before reading their bytes. `ensure_dir` receives a
 /// *file* path and prepares its parent directory; key/value hosts may do nothing.
 /// Missing reads fail, `exists` reports absence, and I/O failures use
 /// `EngineError::Storage` with the original path and operation.
@@ -120,6 +121,11 @@ pub trait StorageHost: Send + Sync {
     fn remove(&self, path: &str) -> Result<(), EngineError>;
     fn ensure_dir(&self, path: &str) -> Result<(), EngineError>;
     fn list_directory(&self, dir_path: &str) -> Result<Vec<String>, EngineError>;
+    /// Hosts whose listings include directories must override this. Flat
+    /// key/value hosts can keep the files-only default.
+    fn is_directory(&self, _path: &str) -> Result<bool, EngineError> {
+        Ok(false)
+    }
     /// List immediate paths with an observation of each file. These are not a
     /// snapshot: callers still check scanned generations before publication.
     /// Entries removed between listing and observation are omitted.
@@ -129,6 +135,9 @@ pub trait StorageHost: Send + Sync {
     ) -> Result<Vec<(String, FileStat)>, EngineError> {
         let mut entries = Vec::new();
         for path in self.list_directory(dir_path)? {
+            if self.is_directory(&path)? {
+                continue;
+            }
             if let Some(stat) = self.stat(&path)? {
                 entries.push((path, stat));
             }

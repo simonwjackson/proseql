@@ -23,12 +23,29 @@ use proseql_storage::partitioned::{
     plan_partitioned_source, LoadedPartitions,
 };
 use proseql_storage::persistence::{CollectionStorageConfig, DurableStorageHost};
+use proseql_storage::record_files::{
+    check_record_conflicts, load_record_files, matches_record_path, plan_record_files,
+    LoadedRecordFiles, RecordFileOperation,
+};
 use proseql_storage::source_config::NormalizedCollectionFileSourceConfig;
 use proseql_storage::source_config::NormalizedDatabaseSourceConfig;
 use proseql_storage::source_config::{
     normalize_source_config, DatabaseSourceConfig, NormalizedSourceConfig, SourceConfigInput,
 };
 use serde_json::Value;
+
+/// Accepted per-file generation changes, delivered after commit and outside
+/// runtime locks. A byte edit is reported even if it decodes to the same value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordFilesReload {
+    pub source_id: String,
+    pub collection: String,
+    pub added: Vec<String>,
+    pub changed: Vec<String>,
+    pub removed: Vec<String>,
+}
+
+pub type RecordFilesReloadCallback = Arc<dyn Fn(RecordFilesReload) + Send + Sync>;
 
 use crate::{NativeCollectionConfig, NativeRuntimeConfig};
 
@@ -48,6 +65,7 @@ pub struct NativeSourceRuntimeOptions {
     /// Callback codecs appended after `formats`; the last extension wins.
     pub plugin_codecs: Vec<proseql_engine::plugins::PluginCodecMetadata>,
     pub formats: FormatRegistry,
+    pub on_record_files_reload: Option<RecordFilesReloadCallback>,
     pub transforms: Option<Arc<dyn DocumentGraphTransformHost>>,
     /// `None` disables automatic watching; explicit reload remains available.
     pub watch_debounce: Option<Duration>,
@@ -72,6 +90,7 @@ impl Default for NativeSourceRuntimeOptions {
             callbacks: CallbackRegistry::new(),
             plugin_codecs: Vec::new(),
             formats: FormatRegistry::with_builtins(),
+            on_record_files_reload: None,
             transforms: None,
             watch_debounce: Some(Duration::from_millis(50)),
             lazy_partitions: IndexMap::new(),
@@ -84,9 +103,60 @@ impl Default for NativeSourceRuntimeOptions {
 /// The writes for one mutation and the source state they produce.
 pub(crate) struct SourcePlan {
     pub writes: Vec<PlannedDocumentWrite>,
+    pub record_operations: Vec<RecordFileOperation>,
     pub documents: LoadedDocumentSources,
     pub files: IndexMap<String, IndexMap<String, Value>>,
     pub partitions: IndexMap<String, LoadedPartitions>,
+    pub record_files: IndexMap<String, LoadedRecordFiles>,
+}
+
+impl SourcePlan {
+    pub fn capture_record_generations(
+        &mut self,
+        host: &dyn StorageHost,
+        config: &NormalizedSourceConfig,
+    ) -> Result<(), EngineError> {
+        for loaded in self.record_files.values_mut() {
+            loaded
+                .generations
+                .retain(|id, _| loaded.records.contains_key(id));
+        }
+        for source in &config.sources {
+            if let proseql_storage::source_config::NormalizedDatabaseSourceConfig::RecordFiles(
+                source,
+            ) = source
+            {
+                let loaded = self
+                    .record_files
+                    .get_mut(&source.collection)
+                    .expect("record source");
+                for operation in &self.record_operations {
+                    if let proseql_storage::record_files::RecordFileOperation::Replace {
+                        path,
+                        ..
+                    } = operation
+                    {
+                        if proseql_storage::record_files::matches_record_path(source, path) {
+                            let id = std::path::Path::new(path)
+                                .file_stem()
+                                .and_then(|s| s.to_str())
+                                .expect("validated stem");
+                            let generation =
+                                proseql_storage::generation::SourceGeneration::observe(host, path)?
+                                    .ok_or_else(|| {
+                                        crate::operation_error(
+                                            "source-changed",
+                                            format!("Missing committed file '{path}'"),
+                                        )
+                                    })?;
+                            loaded.generations.insert(id.into(), generation);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Appends for one mutation of append-only collections, and the records they add.
@@ -122,8 +192,10 @@ pub(crate) struct SourceState {
     /// Records of each collection-file source, keyed by collection name.
     pub files: IndexMap<String, IndexMap<String, Value>>,
     pub partitions: IndexMap<String, LoadedPartitions>,
+    pub record_files: IndexMap<String, LoadedRecordFiles>,
     pub graph: LoadedDocumentGraph,
     pub transforms: Option<Arc<dyn DocumentGraphTransformHost>>,
+    pub on_record_files_reload: Option<RecordFilesReloadCallback>,
     /// Exact bytes for rewrite sources; compact baselines for lazy append files.
     pub contents: IndexMap<String, StoredFile>,
     /// Lazy partitioned collections by collection name. Their records are not
@@ -179,6 +251,7 @@ impl SourceState {
                     source,
                 ) => &source.collection == name,
                 NormalizedDatabaseSourceConfig::Partitioned(source) => &source.collection == name,
+                NormalizedDatabaseSourceConfig::RecordFiles(source) => &source.collection == name,
             });
             if !owned {
                 return Err(crate::operation_error(
@@ -280,6 +353,9 @@ impl SourceState {
                 NormalizedDatabaseSourceConfig::Partitioned(source) => {
                     source.id != owner && matches_partition_path(source, path)
                 }
+                NormalizedDatabaseSourceConfig::RecordFiles(source) => {
+                    source.id != owner && matches_record_path(source, path)
+                }
             };
             if conflicting {
                 return Err(crate::operation_error(
@@ -301,6 +377,7 @@ impl SourceState {
         lazy: &IndexMap<String, crate::lazy::LazyCollection>,
         lazy_watch_interval: Duration,
         callbacks: &Arc<CallbackRegistry>,
+        on_record_files_reload: Option<RecordFilesReloadCallback>,
     ) -> Result<Self, EngineError> {
         // FsStorageHost::exists recovers per-file markers. Do this before the
         // loader lists files: recovery can remove an uncommitted first write.
@@ -381,6 +458,28 @@ impl SourceState {
                 load_collection_file(&snapshot, formats, source, collection)?
             };
             files.insert(source.collection.clone(), records);
+        }
+        let mut record_files = IndexMap::new();
+        for source in &config.sources {
+            if let NormalizedDatabaseSourceConfig::RecordFiles(source) = source {
+                let mut loaded = load_record_files(
+                    host,
+                    formats,
+                    source,
+                    &decode_config.collection_configs[&source.collection],
+                )?;
+                let collection = &config.collection_configs[&source.collection];
+                crate::schema_checks::decode_loaded_records(
+                    &collection.schema,
+                    &collection.id_strategy,
+                    &mut loaded.records,
+                    callbacks,
+                )
+                .map_err(|cause| {
+                    proseql_storage::record_files::error(source, &source.root, cause.to_string())
+                })?;
+                record_files.insert(source.collection.clone(), loaded);
+            }
         }
         let mut partitions = IndexMap::new();
         let mut lazy_state = IndexMap::new();
@@ -512,6 +611,8 @@ impl SourceState {
             documents,
             files,
             partitions,
+            record_files,
+            on_record_files_reload,
             graph,
             transforms,
             contents,
@@ -524,6 +625,11 @@ impl SourceState {
     pub fn collections(&self) -> IndexMap<String, IndexMap<String, Value>> {
         let mut collections = self.documents.collections.clone();
         collections.extend(self.files.clone());
+        collections.extend(
+            self.record_files
+                .iter()
+                .map(|(name, loaded)| (name.clone(), loaded.records.clone())),
+        );
         collections.extend(
             self.partitions
                 .iter()
@@ -547,6 +653,31 @@ impl SourceState {
         let mut writes = Vec::new();
         let mut files = self.files.clone();
         let mut partitions = self.partitions.clone();
+        let mut record_files = self.record_files.clone();
+        let mut record_operations = Vec::new();
+        for source in &self.config.sources {
+            if let NormalizedDatabaseSourceConfig::RecordFiles(source) = source {
+                let candidate = candidate
+                    .get(&source.collection)
+                    .cloned()
+                    .unwrap_or_default();
+                let operations = plan_record_files(
+                    formats,
+                    source,
+                    &self.config.collection_configs[&source.collection],
+                    &self.record_files[&source.collection],
+                    &candidate,
+                )?;
+                for operation in &operations {
+                    Self::require_writable_path(&self.config, &source.id, operation.path())?;
+                }
+                record_operations.extend(operations);
+                record_files
+                    .get_mut(&source.collection)
+                    .expect("loaded record source")
+                    .records = candidate;
+            }
+        }
         for source in &self.config.sources {
             if let NormalizedDatabaseSourceConfig::Partitioned(source) = source {
                 if self.appendable.contains(&source.collection) {
@@ -629,7 +760,11 @@ impl SourceState {
         }
         next.collections = candidate
             .iter()
-            .filter(|(name, _)| !files.contains_key(*name) && !partitions.contains_key(*name))
+            .filter(|(name, _)| {
+                !files.contains_key(*name)
+                    && !partitions.contains_key(*name)
+                    && !record_files.contains_key(*name)
+            })
             .map(|(name, records)| (name.clone(), records.clone()))
             .collect();
         writes.sort_by(|left, right| left.path.cmp(&right.path));
@@ -638,6 +773,8 @@ impl SourceState {
             documents: next,
             files,
             partitions,
+            record_files,
+            record_operations,
         })
     }
 
@@ -945,6 +1082,69 @@ impl SourceState {
         Ok(())
     }
 
+    pub fn record_reload_diff(&self, next: &Self) -> Vec<RecordFilesReload> {
+        let mut diffs = Vec::new();
+        for source in &self.config.sources {
+            let NormalizedDatabaseSourceConfig::RecordFiles(source) = source else {
+                continue;
+            };
+            let before = &self.record_files[&source.collection].generations;
+            let after = &next.record_files[&source.collection].generations;
+            let mut diff = RecordFilesReload {
+                source_id: source.id.clone(),
+                collection: source.collection.clone(),
+                added: Vec::new(),
+                changed: Vec::new(),
+                removed: Vec::new(),
+            };
+            for (id, generation) in after {
+                match before.get(id) {
+                    None => diff.added.push(id.clone()),
+                    Some(previous) if previous != generation => diff.changed.push(id.clone()),
+                    _ => {}
+                }
+            }
+            diff.removed
+                .extend(before.keys().filter(|id| !after.contains_key(*id)).cloned());
+            diff.added.sort();
+            diff.changed.sort();
+            diff.removed.sort();
+            if !diff.added.is_empty() || !diff.changed.is_empty() || !diff.removed.is_empty() {
+                diffs.push(diff);
+            }
+        }
+        diffs
+    }
+
+    pub fn check_record_operations(
+        &self,
+        host: &dyn DurableStorageHost,
+        operations: &[RecordFileOperation],
+    ) -> Result<(), EngineError> {
+        for operation in operations {
+            if let RecordFileOperation::Remove { path } = operation {
+                host.preflight_remove_durable(path)?;
+            }
+        }
+        for source in &self.config.sources {
+            if let NormalizedDatabaseSourceConfig::RecordFiles(source) = source {
+                let relevant = operations
+                    .iter()
+                    .filter(|op| matches_record_path(source, op.path()))
+                    .collect::<Vec<_>>();
+                // Pass borrowed operations without duplicating encoded payloads.
+                for operation in relevant {
+                    check_record_conflicts(
+                        host,
+                        &self.record_files[&source.collection],
+                        std::slice::from_ref(operation),
+                    )?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub fn watch_roots(&self, host: &dyn StorageHost) -> Result<Vec<String>, EngineError> {
         let mut roots = Vec::new();
         for source in &self.config.sources {
@@ -968,6 +1168,9 @@ impl SourceState {
                 NormalizedDatabaseSourceConfig::Partitioned(source)
                     if self.lazy.contains_key(&source.collection) => {}
                 NormalizedDatabaseSourceConfig::Partitioned(source) => {
+                    roots.push(source.root.clone())
+                }
+                NormalizedDatabaseSourceConfig::RecordFiles(source) => {
                     roots.push(source.root.clone())
                 }
             }

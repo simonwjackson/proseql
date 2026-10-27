@@ -69,6 +69,10 @@ fn recovery_marker_committed(path: &Path) -> std::io::Result<bool> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DurabilityFaultPoint {
+    /// Before unlink: failure leaves the file intact.
+    RemoveUnlink,
+    /// After unlink, before syncing the parent: failure requires reopen.
+    RemoveDirectorySync,
     StageWrite,
     FileSync,
     PendingMarkerWrite,
@@ -533,6 +537,28 @@ impl FsStorageHost {
 }
 
 impl DurableStorageHost for FsStorageHost {
+    fn preflight_remove_durable(&self, _path: &str) -> Result<(), EngineError> {
+        Ok(())
+    }
+
+    fn remove_durable(&self, path: &str) -> Result<(), EngineError> {
+        self.recover_durable_path(path)?;
+        self.check_durability_fault(DurabilityFaultPoint::RemoveUnlink)?;
+        std::fs::remove_file(path).map_err(|error| {
+            storage_error(
+                path,
+                StorageOperation::Delete,
+                format!("Failed to unlink '{path}': {error}"),
+            )
+        })?;
+        self.check_durability_fault(DurabilityFaultPoint::RemoveDirectorySync)?;
+        let parent = Path::new(path)
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        Self::sync_directory(path, parent)
+    }
+
     fn append_durable(&self, path: &str, keep_len: u64, data: &str) -> Result<(), EngineError> {
         self.append_file(path, keep_len, data, false).map(|_| ())
     }
@@ -999,6 +1025,17 @@ impl StorageHost for FsStorageHost {
         Self::ensure_parent(path)
     }
 
+    fn is_directory(&self, path: &str) -> Result<bool, EngineError> {
+        match std::fs::metadata(path) {
+            Ok(metadata) => Ok(metadata.is_dir()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(error) => Err(storage_error(
+                path,
+                StorageOperation::List,
+                error.to_string(),
+            )),
+        }
+    }
     fn list_directory(&self, dir_path: &str) -> Result<Vec<String>, EngineError> {
         let mut entries = std::fs::read_dir(dir_path)
             .map_err(|error| {

@@ -14,6 +14,90 @@ Source mode rejects `replace_all`; use `mutate` for app-owned changes. Single-fi
 
 The consumer example at `crates/proseql-native/examples/support/coach.rs` maps the legacy Coach source configuration. It declares one writable source, two YAML graph sources, and one graph with fifteen JSONL roots. It supplies a custom transform and an opt-in lenient JSONL codec. Coach-specific names do not enter the library implementation.
 
+## One file per record (native RecordFiles)
+
+`DatabaseSourceConfig::RecordFiles(RecordFilesSourceConfig { id, collection, root, format })`
+stores one collection in flat `<root>/<id>.<format>` files. The normalized enum
+uses the same config type with a normalized root. `format` is a registered codec
+extension, such as `json`, not an inferred collection format. Every file must
+decode to one object. Arrays, scalars, empty decodes, malformed bytes, and unsafe
+matching stems fail with the file path. Nothing is silently skipped except dot
+entries, directories, and files with another extension. A missing root is empty;
+the first create makes its folder, and managed watching uses an existing ancestor.
+
+```rust
+use proseql_storage::source_config::{DatabaseSourceConfig, RecordFilesSourceConfig};
+let source = DatabaseSourceConfig::RecordFiles(RecordFilesSourceConfig {
+    id: "note-files".into(), collection: "notes".into(),
+    root: "./notes".into(), format: "json".into(),
+});
+```
+
+Use `IdStrategy::DerivedFromKey` with an object payload schema that has no `id`.
+The runtime adds the stem as `id`; write checks and persisted bytes omit that
+synthetic field. A physical `id` is rejected for this strategy. `Provided` requires
+a string payload `id` equal to the stem. Named generators, version metadata and
+migrations are not supported by this source. The same safe component rules as
+Partitioned apply: nonempty ASCII letters, digits, `-`, `_`, and `.`, with no
+leading dot. IDs containing `:` or `/` fail before writes. Duplicate creates use
+the existing duplicate-key error. Dotfiles are ignored by design, not reported
+as invalid IDs.
+
+Creates and updates replace only changed files. Deletes unlink their file and
+sync the containing directory. No-op updates, unchanged records, flush, and close
+write nothing. All encoding, registry write checks, removal capability checks,
+and source-generation conflict checks finish before the first durable operation.
+An external edit since load refuses writes/removals; this is not cross-process
+locking. Do not run concurrent writers against one root.
+
+Operations run in sorted path order under the existing prefix-commit rule: there
+is no batch journal or all-files atomicity. A failure after an operation starts
+can leave a committed prefix. The runtime quarantines, names completed paths,
+and requires reopen/inspection. `DurableStorageHost::preflight_remove_durable`
+and `remove_durable` default to an unsupported error without unlinking. A custom
+host must implement both; removal must unlink then sync the parent before success.
+`FsStorageHost` exposes `RemoveUnlink` (before unlink) and
+`RemoveDirectorySync` (after unlink, before sync) durability fault points.
+`MemoryStorageHost` provides the corresponding in-process behavior.
+
+Each collection has one source owner. RecordFiles rejects another flat owner of
+the same root/extension, matching collection-file paths, and overlapping document
+or graph root trees even when empty. Document/graph tree overlap is conservative:
+use sibling roots rather than relying on glob exclusions to share an ancestor.
+
+### Accepted reload details
+
+`NativeSourceRuntimeOptions.on_record_files_reload` accepts
+`Option<Arc<dyn Fn(RecordFilesReload) + Send + Sync>>`. The public event has
+`source_id`, `collection`, and sorted `added`, `changed`, `removed: Vec<String>`.
+It is additive native API; the shared `ChangeEvent` wire format does not change.
+The callback runs for explicit and managed reload after engine/source commit and
+outside runtime locks. It can read or mutate the runtime. Generations are compared
+per file, not by comparing all decoded payloads: a byte edit with the same decoded
+value is still changed. Unchanged reloads and self-writes produce no callback.
+Invalid external bytes keep the previous accepted state/baseline and emit nothing;
+a later valid edit recovers. Session owners retain this callback service, not rows.
+
+```rust
+use std::sync::Arc;
+use proseql_native::NativeSourceRuntimeOptions;
+let options = NativeSourceRuntimeOptions {
+    on_record_files_reload: Some(Arc::new(|diff| {
+        // Append to an application-owned log, or notify its worker.
+        assert!(!diff.source_id.is_empty());
+    })),
+    ..Default::default()
+};
+```
+
+See the complete compiling, runnable
+[`record_files` example](../crates/proseql-native/examples/record_files.rs).
+
+The TypeScript `CollectionConfig.directory` API is retained and uses the same
+physical one-file-per-record layout. Native RecordFiles is separate. This change
+does **not** claim TypeScript parity for durability, stem-derived schemas,
+selective rewrites, or reload details. No TypeScript API is retired.
+
 ## Source sessions with no idle row cache
 
 Use `NativeSourceSessions` when durable records must leave memory after an operation. The owner retains configuration and registered services, not a loaded database. It supports the same durable collection files, writable documents, partitions, and read-only graphs as `NativeRuntime`.

@@ -132,12 +132,22 @@ pub struct PartitionedSourceConfig {
     pub prose: Option<ProseCodecOptions>,
 }
 
+/// One object per flat `<root>/<id>.<format>` file. The stem is the record ID.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RecordFilesSourceConfig {
+    pub id: String,
+    pub collection: String,
+    pub root: String,
+    pub format: String,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum DatabaseSourceConfig {
     Documents(DocumentSourceConfig),
     DocumentGraph(DocumentGraphSourceConfig),
     CollectionFile(CollectionFileSourceConfig),
     Partitioned(PartitionedSourceConfig),
+    RecordFiles(RecordFilesSourceConfig),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -194,6 +204,7 @@ pub enum NormalizedDatabaseSourceConfig {
     DocumentGraph(NormalizedDocumentGraphSourceConfig),
     CollectionFile(NormalizedCollectionFileSourceConfig),
     Partitioned(PartitionedSourceConfig),
+    RecordFiles(RecordFilesSourceConfig),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -590,6 +601,55 @@ pub fn normalize_source_config(
                     },
                 ));
             }
+            DatabaseSourceConfig::RecordFiles(mut source) => {
+                let error = |message: String| {
+                    source_config_error(
+                        message,
+                        Some(source.id.clone()),
+                        Some(source.collection.clone()),
+                        Some(source.root.clone()),
+                    )
+                };
+                if !source_ids.insert(source.id.clone()) {
+                    return Err(error(format!("Duplicate source id '{}'", source.id)));
+                }
+                let Some(collection) = input.collections.get(&source.collection) else {
+                    return Err(error(format!(
+                        "Undeclared collection '{}'",
+                        source.collection
+                    )));
+                };
+                if let Some(existing) = owners.insert(source.collection.clone(), source.id.clone())
+                {
+                    return Err(error(format!(
+                        "Collection '{}' is backed by both '{}' and '{}'",
+                        source.collection, existing, source.id
+                    )));
+                }
+                if source.root.trim().is_empty()
+                    || !crate::partitioned::safe_component(&source.format)
+                {
+                    return Err(error(
+                        "RecordFiles needs a nonempty root and a safe format extension".into(),
+                    ));
+                }
+                if !matches!(
+                    collection.id_strategy,
+                    proseql_engine::descriptor::IdStrategy::Provided
+                        | proseql_engine::descriptor::IdStrategy::DerivedFromKey
+                ) {
+                    return Err(error(
+                        "RecordFiles supports only Provided or DerivedFromKey IDs".into(),
+                    ));
+                }
+                if collection.version.is_some() || !collection.migrations.is_empty() {
+                    return Err(error(
+                        "RecordFiles does not support version metadata or migrations".into(),
+                    ));
+                }
+                source.root = normalize_path(&source.root);
+                sources.push(NormalizedDatabaseSourceConfig::RecordFiles(source));
+            }
             DatabaseSourceConfig::Partitioned(mut source) => {
                 let error = |message: String| {
                     source_config_error(
@@ -730,6 +790,45 @@ pub fn normalize_source_config(
         }
     }
 
+    // Flat record owners must be unambiguous even when no files exist yet.
+    // Document glob intersection is deliberately conservative: do not share
+    // ancestor trees with RecordFiles. Disjoint sibling roots remain valid.
+    for source in &sources {
+        let NormalizedDatabaseSourceConfig::RecordFiles(record) = source else {
+            continue;
+        };
+        let overlaps_tree = |root: &str| {
+            std::path::Path::new(&record.root).starts_with(root)
+                || std::path::Path::new(root).starts_with(&record.root)
+        };
+        for other in &sources {
+            let overlap = match other {
+                NormalizedDatabaseSourceConfig::RecordFiles(other) => {
+                    other.id != record.id
+                        && other.root == record.root
+                        && other.format == record.format
+                }
+                NormalizedDatabaseSourceConfig::Partitioned(other) => {
+                    other.root == record.root && other.format == record.format
+                }
+                NormalizedDatabaseSourceConfig::CollectionFile(other) => {
+                    crate::record_files::matches_record_path(record, &other.path)
+                }
+                NormalizedDatabaseSourceConfig::Documents(other) => overlaps_tree(&other.root),
+                NormalizedDatabaseSourceConfig::DocumentGraph(other) => {
+                    other.roots.iter().any(|root| overlaps_tree(&root.root))
+                }
+            };
+            if overlap {
+                return Err(source_config_error(
+                    "RecordFiles root overlaps another source",
+                    Some(record.id.clone()),
+                    Some(record.collection.clone()),
+                    Some(record.root.clone()),
+                ));
+            }
+        }
+    }
     let mut partition_roots = std::collections::HashMap::new();
     for source in &sources {
         if let NormalizedDatabaseSourceConfig::Partitioned(source) = source {

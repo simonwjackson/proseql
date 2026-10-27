@@ -29,7 +29,10 @@ mod write;
 pub use lazy::{FullScanPolicy, LazyPartitionPolicy, LazyPartitionStatus, NativeQueryStats};
 pub use source_sessions::{IdleMemoryReclaim, NativeSourceSession, NativeSourceSessions};
 use sources::SourceState;
-pub use sources::{NativeSourceRuntimeConfig, NativeSourceRuntimeOptions};
+pub use sources::{
+    NativeSourceRuntimeConfig, NativeSourceRuntimeOptions, RecordFilesReload,
+    RecordFilesReloadCallback,
+};
 
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
@@ -967,12 +970,21 @@ impl NativeRuntime {
     /// and retained as a diagnostic while the current LKG remains visible.
     pub fn reload(&self) -> Result<(), EngineError> {
         let mut state = self.lock_open()?;
+        let callback = state
+            .sources
+            .as_ref()
+            .and_then(|s| s.on_record_files_reload.clone());
         let result = reload_locked(&mut state, false, None);
         drop(state);
         // An invalid edit to a partition a streaming watch covers fails the
         // reload, as it does for a resident (pinned) partition today.
+        if let (Ok(diffs), Some(callback)) = (&result, callback) {
+            for diff in diffs {
+                callback(diff.clone());
+            }
+        }
         let watches = self.refresh_streaming_watches();
-        result.and(watches)
+        result.map(|_| ()).and(watches)
     }
 
     pub fn last_reload_error(&self) -> Result<Option<EngineError>, EngineError> {
@@ -1187,6 +1199,7 @@ fn commit_source_mutation<R>(
                 .snapshot_collection_states_except(&sources.appendable);
             let plan = sources.plan(&state.formats, &candidate)?;
             sources.check_conflicts(state.host.as_ref(), &plan.writes)?;
+            sources.check_record_operations(state.host.as_ref(), &plan.record_operations)?;
             Some(plan)
         } else {
             None
@@ -1194,7 +1207,7 @@ fn commit_source_mutation<R>(
         sources.check_append_conflicts(state.host.as_ref(), &appends.writes)?;
         Ok((appends, rewrite))
     })();
-    let (appends, rewrite) = match plan {
+    let (appends, mut rewrite) = match plan {
         Ok(plan) => plan,
         Err(error) => {
             rollback_preserving_original(core, state, session, &error);
@@ -1204,19 +1217,29 @@ fn commit_source_mutation<R>(
     enum Write<'a> {
         Replace(&'a proseql_storage::document_source::PlannedDocumentWrite),
         Append(&'a proseql_storage::append::PlannedAppend),
+        Record(&'a proseql_storage::record_files::RecordFileOperation),
     }
     let mut writes = appends.writes.iter().map(Write::Append).collect::<Vec<_>>();
     if let Some(rewrite) = &rewrite {
         writes.extend(rewrite.writes.iter().map(Write::Replace));
+        writes.extend(rewrite.record_operations.iter().map(Write::Record));
     }
     let path_of = |write: &Write<'_>| match write {
         Write::Replace(write) => write.path.clone(),
         Write::Append(write) => write.path.clone(),
+        Write::Record(write) => write.path().to_owned(),
     };
     writes.sort_by_key(path_of);
     let mut completed = Vec::new();
     for write in &writes {
         let outcome = match write {
+            Write::Record(operation) => {
+                use proseql_storage::record_files::RecordFileOperation;
+                match operation {
+                    RecordFileOperation::Replace { path, content } => state.host.replace_durable(path, content),
+                    RecordFileOperation::Remove { path } => state.host.remove_durable(path),
+                }.map_err(|cause| operation_error("source-write-failed", format!("Durable source operation failed at '{}'; completed paths: {:?}; cause: {cause}. Reopen and inspect before retrying", operation.path(), completed)))
+            },
             Write::Replace(write) => state
                 .host
                 .replace_durable(&write.path, &write.content)
@@ -1235,6 +1258,19 @@ fn commit_source_mutation<R>(
         completed.push(path_of(write));
     }
     drop(writes);
+    // Capture committed generations before publication. Failure cannot safely
+    // resume this runtime after durable operations, so use the same quarantine.
+    if let Some(plan) = &mut rewrite {
+        let observed = plan.capture_record_generations(
+            state.host.as_ref(),
+            &state.sources.as_ref().expect("source mode").config,
+        );
+        if let Err(error) = observed {
+            rollback_preserving_original(core, state, session, &error);
+            state.quarantine_error = Some(error.clone());
+            return Err(error);
+        }
+    }
     if let Err(error) = state.database.commit_owned_transaction(session) {
         state.quarantine_error = Some(error.clone());
         return Err(error);
@@ -1246,9 +1282,12 @@ fn commit_source_mutation<R>(
         documents,
         files,
         partitions,
+        record_files,
+        record_operations: _,
     }) = rewrite
     {
         sources.documents = documents;
+        sources.record_files = record_files;
         // The rewrite plan skips append-only collections; keep their state.
         for (name, records) in files {
             if !sources.appendable.contains(&name) {
@@ -1333,6 +1372,7 @@ fn schedule_reload(weak: &Weak<RuntimeCore>, debounce: Duration) {
         {
             return;
         }
+        let mut delivery = None;
         if let Ok(mut state) = core.state.lock() {
             if core.lifecycle.load(Ordering::Acquire) == OPEN && state.quarantine_error.is_none() {
                 let changed = core
@@ -1340,9 +1380,22 @@ fn schedule_reload(weak: &Weak<RuntimeCore>, debounce: Duration) {
                     .lock()
                     .map(|mut events| std::mem::take(&mut *events))
                     .ok();
-                let _ = reload_locked(&mut state, true, changed);
+                let callback = state
+                    .sources
+                    .as_ref()
+                    .and_then(|s| s.on_record_files_reload.clone());
+                if let (Ok(diffs), Some(callback)) =
+                    (reload_locked(&mut state, true, changed), callback)
+                {
+                    delivery = Some((callback, diffs));
+                }
             }
         };
+        if let Some((callback, diffs)) = delivery {
+            for diff in diffs {
+                callback(diff);
+            }
+        }
         // Errors are recorded in last_reload_error by the hook.
         let _ = NativeRuntime {
             inner: Arc::clone(&core),
@@ -1358,8 +1411,9 @@ fn reload_locked(
     state: &mut RuntimeState,
     suppress_self_write: bool,
     changed: Option<Vec<proseql_storage::host::StorageEvent>>,
-) -> Result<(), EngineError> {
+) -> Result<Vec<RecordFilesReload>, EngineError> {
     let changed = changed.filter(|_| suppress_self_write);
+    let mut diffs = Vec::new();
     let result: Result<(), EngineError> = (|| {
         if let Some(sources) = &state.sources {
             if let Some(names) = &changed {
@@ -1376,7 +1430,9 @@ fn reload_locked(
                 &sources.lazy,
                 sources.lazy_watch_interval,
                 &state.callbacks,
+                sources.on_record_files_reload.clone(),
             )?;
+            let accepted_diffs = sources.record_reload_diff(&next);
             state
                 .database
                 .commit_snapshot_transaction(states_to_records(next.collections()))?;
@@ -1385,6 +1441,7 @@ fn reload_locked(
                 next.lazy_adopt(previous);
             }
             state.sources = Some(next);
+            diffs = accepted_diffs;
             return refresh_lazy_locked(state);
         }
         let content = state.host.read(&state.config.path)?;
@@ -1420,7 +1477,7 @@ fn reload_locked(
     match result {
         Ok(()) => {
             state.last_reload_error = None;
-            Ok(())
+            Ok(diffs)
         }
         Err(error) => {
             state.last_reload_error = Some(error.clone());

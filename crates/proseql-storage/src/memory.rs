@@ -150,6 +150,13 @@ impl MemoryStorageHost {
 }
 
 impl crate::persistence::DurableStorageHost for MemoryStorageHost {
+    fn preflight_remove_durable(&self, _path: &str) -> Result<(), EngineError> {
+        Ok(())
+    }
+    fn remove_durable(&self, path: &str) -> Result<(), EngineError> {
+        self.remove(path)
+    }
+
     fn replace_durable(&self, path: &str, data: &str) -> Result<(), EngineError> {
         self.write(path, data)
     }
@@ -242,6 +249,14 @@ impl StorageHost for MemoryStorageHost {
         Ok(())
     }
 
+    fn is_directory(&self, path: &str) -> Result<bool, EngineError> {
+        let prefix = format!("{}/", normalize_path(path).trim_end_matches('/'));
+        let files =
+            self.inner.files.lock().map_err(|_| {
+                storage_error(path, StorageOperation::List, "Poisoned memory storage")
+            })?;
+        Ok(files.keys().any(|key| key.starts_with(&prefix)))
+    }
     fn list_directory(&self, dir_path: &str) -> Result<Vec<String>, EngineError> {
         let dir_path = normalize_path(dir_path).trim_end_matches('/').to_owned();
         let prefix = format!("{dir_path}/");

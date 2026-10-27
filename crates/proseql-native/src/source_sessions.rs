@@ -113,6 +113,7 @@ pub(crate) struct PreparedSourceRuntime {
     lazy_watch_interval: Duration,
     watch_debounce: Option<Duration>,
     services: RuntimeServices,
+    on_record_files_reload: Option<crate::sources::RecordFilesReloadCallback>,
     host: Arc<dyn DurableStorageHost>,
 }
 impl PreparedSourceRuntime {
@@ -148,6 +149,7 @@ impl PreparedSourceRuntime {
             lazy_watch_interval: options.lazy_watch_interval,
             watch_debounce: options.watch_debounce,
             services,
+            on_record_files_reload: options.on_record_files_reload,
             host,
         })
     }
@@ -163,6 +165,7 @@ impl PreparedSourceRuntime {
                 &self.lazy,
                 self.lazy_watch_interval,
                 &self.services.callbacks,
+                self.on_record_files_reload.clone(),
             )?
         };
         let loaded = sources.collections();

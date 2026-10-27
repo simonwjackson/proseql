@@ -38,10 +38,32 @@ pub struct AppendIdentity {
 /// Storage host capable of replacing one persisted source as a durable commit.
 ///
 /// Implementations must not return success until the complete replacement is
-/// recoverable after process or machine interruption. On failure, callers may
-/// continue using the previously committed source.
+/// recoverable after process or machine interruption. A failed replacement
+/// recovers the previous source. Failed appends/removals can leave a partial
+/// commit: batch callers must quarantine and reopen, not publish staged state.
 pub trait DurableStorageHost: StorageHost {
     fn replace_durable(&self, path: &str, data: &str) -> Result<(), EngineError>;
+
+    /// Validate durable removal support before *any* operation in a batch.
+    /// The safe default refuses without touching the file. Overrides must
+    /// pair this with remove_durable; this is a capability check, not a lock.
+    fn preflight_remove_durable(&self, path: &str) -> Result<(), EngineError> {
+        Err(crate::host::storage_error(
+            path,
+            StorageOperation::Delete,
+            "Host does not support durable removal",
+        ))
+    }
+
+    /// Unlink and sync the containing directory before success. Failure after
+    /// unlink can leave the file removed; callers must quarantine and reopen.
+    fn remove_durable(&self, path: &str) -> Result<(), EngineError> {
+        Err(crate::host::storage_error(
+            path,
+            StorageOperation::Delete,
+            "Host does not support durable removal",
+        ))
+    }
 
     /// Truncate `path` to `keep_len` bytes, then append `data` durably.
     ///

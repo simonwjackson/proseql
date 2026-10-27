@@ -102,6 +102,9 @@ impl StorageHost for ReadSnapshot<'_> {
     fn exists(&self, path: &str) -> Result<bool, EngineError> {
         self.host.exists(path)
     }
+    fn is_directory(&self, path: &str) -> Result<bool, EngineError> {
+        self.host.is_directory(path)
+    }
     fn list_directory(&self, path: &str) -> Result<Vec<String>, EngineError> {
         self.host.list_directory(path)
     }

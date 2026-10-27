@@ -12,6 +12,7 @@ pub mod partitioned;
 pub mod path;
 pub mod persistence;
 pub mod readers;
+pub mod record_files;
 pub mod reload;
 pub mod source_config;
 pub mod writer;
