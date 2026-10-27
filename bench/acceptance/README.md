@@ -54,7 +54,11 @@ The Stage 0 generator is retained without the throwaway scanner. January–Octob
 minute. `samples` has 10 month files. `raw` copies the same synthetic records into
 256 hash shards. Raw is a synthetic shape, not a private payload-schema claim.
 An additional same-row-count `raw16` fixture measures controlled partition-count
-RSS growth for the ten-month aggregate (16 versus 256 shards).
+RSS growth for the ten-month aggregate (16 versus 256 shards). The generator also
+writes `raw_month`: identical complete raw rows, including `shard`, in ten UTC
+month files. Its native source partitions by `atUtc` `TimeBucket::Month` and has
+an ordered `atUtc` index. SQLite imports it as a third table with the same schema
+and indexes. This changes layout only, not the synthetic raw payload.
 
 | Workload | Native API / behavior |
 |---|---|
@@ -87,6 +91,35 @@ records in both shapes. SQLite temporary files stay under the owned filesystem
 `/home/simonwjackson/work/qws-harness-data/bench2/tmp`. Native synced text appends do not
 have equal power-loss durability to NORMAL WAL. Timing against this requested
 bar is measured; the same-durability qualification remains unmeasured.
+
+## Round-5 index-state matrix
+
+`round5.py` adds three timing trials plus an independent counting-allocator trial
+for SQLite, missing saved indexes and valid saved indexes. It covers every
+standard workload in both cache modes, the raw16 growth control, and the monthly
+raw hour. It refuses existing fixture and per-attempt results directories. Run through
+`aka-run bench5 --x86-64-v2`; never compile or execute it locally.
+
+Build the normal binary, the `heap-meter` binary and `persist_lifecycle` example
+under `flock -s /home/simonwjackson/work/qws5-aka.lock`. Copy them as `timing`,
+`meter` and `persist_lifecycle` to `/home/simonwjackson/work/qws-bench5-results`.
+Then hold the exclusive lock for the entire driver:
+
+```sh
+bash scripts/qws/aka-run bench5 --x86-64-v2 -- env QWS_SOURCE_SHA=TESTED_SHA \
+  flock -x /home/simonwjackson/work/qws5-aka.lock \
+  nix shell --builders '' nixpkgs#python3 --command python3 bench/acceptance/round5.py
+```
+
+The driver waits for load ≤1 inside the lock and repeats the whole block above
+2. All preparation/priming/measured processes have the standard bounded scope.
+`SQLITE_TMPDIR` is the literal bench5-owned filesystem path. Read modes use
+independent destination inodes; sidecars are published on that exact destination.
+Missing indexes are removed before each trial. Each mutation has a fresh copy.
+The driver removes its synthetic data in `finally`. Small summaries can be
+rendered on aka with `round5_report.py`; raw trial logs stay out of Git. Remove
+the three copied binaries after verification. A rerun needs a fresh results
+location (archive the previous owned small evidence first).
 
 ## Timing, memory and verdicts
 

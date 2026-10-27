@@ -16,7 +16,7 @@ type Error = Box<dyn std::error::Error + Send + Sync>;
 fn main() -> Result<(), Error> {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
     if args.len() != 3 {
-        return Err("ROOT samples|raw release|close|time|append".into());
+        return Err("ROOT samples|raw|raw_month release|close|time|append".into());
     }
     let root = std::path::Path::new(&args[0]);
     let (kind, action) = (&args[1], &args[2]);

@@ -34,7 +34,7 @@ fn record(row: &Row<'_>, kind: &str) -> rusqlite::Result<Value> {
         "month":row.get::<_,String>(8)?, "date":row.get::<_,String>(9)?,
         "atUtc":row.get::<_,String>(10)?
     });
-    if kind == "raw" {
+    if kind.starts_with("raw") {
         r["shard"] = json!(row.get::<_, String>(11)?);
     }
     Ok(r)

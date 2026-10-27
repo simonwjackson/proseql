@@ -53,7 +53,7 @@ impl Backend {
 fn global_duplicate_probe(root: &Path, backend: &str, kind: &str) -> Result<bool, Error> {
     use std::io::Write;
     fixture::prepare(root, Some(120), 256)?;
-    let mut stored = if kind == "raw" {
+    let mut stored = if kind.starts_with("raw") {
         fixture::raw(fixture::row(5, 12, 0, false))
     } else {
         fixture::row(5, 12, 0, false)
@@ -123,7 +123,7 @@ fn main() -> Result<(), Error> {
         return Ok(());
     }
     if args.len() != 5 {
-        return Err("usage: proseql-acceptance prepare|prepare16 ROOT | duplicate-check ROOT BACKEND samples|raw | ROOT sqlite|streaming samples|raw WORKLOAD cold|warm".into());
+        return Err("usage: proseql-acceptance prepare|prepare16 ROOT | duplicate-check ROOT BACKEND samples|raw|raw_month | ROOT sqlite|streaming samples|raw|raw_month WORKLOAD cold|warm".into());
     }
     let root = Path::new(&args[0]);
     let (backend, kind, workload, cache) = (&args[1], &args[2], &args[3], &args[4]);
@@ -306,6 +306,36 @@ mod tests {
                 assert!(supported, "Streaming must reject cross-partition conflicts");
             }
         }
+        Ok(())
+    }
+    #[test]
+    fn monthly_raw_keeps_complete_rows_and_prunes_month_files() -> Result<(), Error> {
+        let tmp = tempfile::tempdir()?;
+        let root = tmp.path().join("monthly");
+        fixture::prepare(&root, Some(120), 256)?;
+        assert_eq!(fixture::paths(&root, "raw_month")?.len(), 10);
+        let runtime = native::open(&root, "raw_month")?;
+        let query = Query::new("raw_month", "hour");
+        let (rows, stats) = runtime
+            .query_bounded_with_stats(
+                "raw_month",
+                proseql_engine::query::pipeline::QueryInput {
+                    r#where: Some(query.filter()),
+                    ..Default::default()
+                },
+            )
+            .map_err(|e| e.to_string())?;
+        assert_eq!(stats.partitions_read, 1);
+        let answer = Answer::rows(rows);
+        assert_eq!(answer.count, 90);
+        assert_eq!(
+            answer,
+            Backend::open(&root, "sqlite", "raw_month")?.run("raw_month", "hour")?
+        );
+        assert_eq!(
+            answer,
+            Backend::open(&root, "streaming", "raw")?.run("raw", "hour")?
+        );
         Ok(())
     }
     #[test]

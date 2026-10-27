@@ -46,7 +46,7 @@ pub fn open(root: &Path, kind: &str) -> Result<NativeRuntime, Error> {
         name: "end".into(),
         schema: SchemaNode::NullOr(Box::new(SchemaNode::Str)),
     });
-    if kind == "raw" {
+    if kind.starts_with("raw") {
         fields.push(StructField {
             name: "shard".into(),
             schema: SchemaNode::Str,

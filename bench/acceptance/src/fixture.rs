@@ -6,7 +6,7 @@ use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 pub const DAYS: [usize; 10] = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31];
-pub const KINDS: [&str; 2] = ["samples", "raw"];
+pub const KINDS: [&str; 3] = ["samples", "raw", "raw_month"];
 pub const WORKLOADS: [&str; 8] = [
     "point",
     "hour",
@@ -52,7 +52,7 @@ pub fn raw(mut row: Value) -> Value {
 
 pub fn point(kind: &str) -> Value {
     let r = row(5, 12, 0, false);
-    if kind == "raw" {
+    if kind.starts_with("raw") {
         raw(r)
     } else {
         r
@@ -64,7 +64,7 @@ pub fn append_rows(kind: &str) -> Vec<Value> {
     (0..1000)
         .map(|i| {
             let r = row(10, i, 0, true);
-            if kind == "raw" {
+            if kind.starts_with("raw") {
                 raw(r)
             } else {
                 r
@@ -114,6 +114,7 @@ pub fn prepare(root: &Path, cap: Option<usize>, shard_count: u64) -> Result<Mani
     }
     fs::create_dir_all(root.join("samples"))?;
     fs::create_dir(root.join("raw"))?;
+    fs::create_dir(root.join("raw_month"))?;
     let mut shards = (0..shard_count)
         .map(|i| File::create(root.join(format!("raw/{i:02x}.jsonl"))).map(BufWriter::new))
         .collect::<Result<Vec<_>, _>>()?;
@@ -121,6 +122,9 @@ pub fn prepare(root: &Path, cap: Option<usize>, shard_count: u64) -> Result<Mani
     for (month, days) in DAYS.iter().enumerate() {
         let mut out = BufWriter::new(File::create(
             root.join(format!("samples/2025-{:02}.jsonl", month + 1)),
+        )?);
+        let mut monthly_raw = BufWriter::new(File::create(
+            root.join(format!("raw_month/2025-{:02}.jsonl", month + 1)),
         )?);
         for minute in 0..cap.unwrap_or(days * 1440).min(days * 1440) {
             for metric in 0..if minute % 2 == 0 { 2 } else { 1 } {
@@ -132,11 +136,15 @@ pub fn prepare(root: &Path, cap: Option<usize>, shard_count: u64) -> Result<Mani
                 r["shard"] = json!(format!("{shard:02x}"));
                 serde_json::to_writer(&mut shards[shard], &r)?;
                 shards[shard].write_all(b"\n")?;
+                serde_json::to_writer(&mut monthly_raw, &r)?;
+                monthly_raw.write_all(b"\n")?;
                 count += 1;
             }
         }
         out.flush()?;
         out.get_ref().sync_all()?;
+        monthly_raw.flush()?;
+        monthly_raw.get_ref().sync_all()?;
     }
     for shard in &mut shards {
         shard.flush()?;
@@ -151,7 +159,7 @@ pub fn prepare(root: &Path, cap: Option<usize>, shard_count: u64) -> Result<Mani
     }
     sql::import(root)?;
     let manifest = Manifest {
-        generator: 1,
+        generator: 2,
         rows_per_kind: count,
         minutes_per_month: cap,
         bytes,
