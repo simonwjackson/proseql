@@ -1,0 +1,3 @@
+rustc 1.92.0 (ded5c06cf 2025-12-08)
+8ac845ed83fa6b8f0fbaf1fdf50406203857ba0dabd82db1a367b8adb47dc179  /home/simonwjackson/work/qws-persist-target/release/proseql-acceptance
+5de196465d9c4f84cfcbca17ecd11cbd33d04c3a4761e70cee39442ba01db4c5  /home/simonwjackson/work/qws-persist-target/release/examples/persist_lifecycle
