@@ -578,11 +578,15 @@ fn relative_missing_root_watch_child() {
         runtime.find_by_id("records", "a").unwrap().unwrap()["text"],
         "relative external"
     );
+    runtime
+        .mutate(|db| db.create("records", json!({"id":"b", "text":"relative create"})))
+        .unwrap();
+    assert!(root.join("b.json").exists());
     runtime.close().unwrap();
 }
 #[test]
 fn managed_watch_finds_missing_relative_and_nested_relative_roots() {
-    for root in ["contacts", "nested/contacts"] {
+    for root in ["contacts", "nested/contacts", "."] {
         let dir = tempfile::tempdir().unwrap();
         let status = std::process::Command::new(std::env::current_exe().unwrap())
             .args([

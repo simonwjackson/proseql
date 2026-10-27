@@ -328,3 +328,37 @@ fn lazy_refresh_error_does_not_consume_unaccepted_record_reload_diff() {
         "changed"
     );
 }
+
+#[test]
+fn first_create_syncs_new_parent_chain_before_replacement() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    struct ParentSyncs(AtomicUsize);
+    impl DurabilityFaultInjector for ParentSyncs {
+        fn check(&self, point: DurabilityFaultPoint) -> Result<(), EngineError> {
+            if point == DurabilityFaultPoint::ParentDirectorySync {
+                self.0.fetch_add(1, Ordering::SeqCst);
+            }
+            if point == DurabilityFaultPoint::AtomicReplace {
+                assert_eq!(self.0.load(Ordering::SeqCst), 3);
+            }
+            Ok(())
+        }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("one/two");
+    let syncs = Arc::new(ParentSyncs(AtomicUsize::new(0)));
+    let host = Arc::new(
+        FsStorageHost::new_polling_with_fault_injector(Duration::from_secs(2), syncs.clone())
+            .unwrap(),
+    );
+    let runtime = NativeRuntime::open_sources_with_host(config(&root), host, options()).unwrap();
+    runtime
+        .mutate(|db| db.create("items", json!({"id":"a","text":"first"})))
+        .unwrap();
+    assert_eq!(syncs.0.load(Ordering::SeqCst), 3);
+    assert!(root.join("a.json").exists());
+    runtime
+        .mutate(|db| db.create("items", json!({"id":"b","text":"second"})))
+        .unwrap();
+    assert_eq!(syncs.0.load(Ordering::SeqCst), 3);
+}

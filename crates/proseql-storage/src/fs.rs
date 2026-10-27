@@ -69,6 +69,8 @@ fn recovery_marker_committed(path: &Path) -> std::io::Result<bool> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DurabilityFaultPoint {
+    /// Before syncing newly created parent directories and their ancestor.
+    ParentDirectorySync,
     /// Before unlink: failure leaves the file intact.
     RemoveUnlink,
     /// After unlink, before syncing the parent: failure requires reopen.
@@ -156,6 +158,7 @@ impl FsStorageHost {
         let destination = PathBuf::from(path);
         let parent = destination
             .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
             .unwrap_or_else(|| Path::new("."))
             .to_path_buf();
         let filename = destination
@@ -303,6 +306,75 @@ impl FsStorageHost {
                     format!("Failed to create directory for '{path}': {error}"),
                 )
             })?;
+        }
+        Ok(())
+    }
+
+    fn ensure_parent_durable(&self, path: &str) -> Result<(), EngineError> {
+        let parent = Path::new(path)
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        let mut missing = Vec::new();
+        let mut ancestor = parent;
+        loop {
+            match std::fs::metadata(ancestor) {
+                Ok(metadata) if metadata.is_dir() => break,
+                Ok(_) => {
+                    return Err(storage_error(
+                        path,
+                        StorageOperation::Write,
+                        "A source parent is not a directory",
+                    ))
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    return Err(storage_error(
+                        path,
+                        StorageOperation::Write,
+                        error.to_string(),
+                    ))
+                }
+            }
+            if ancestor == Path::new(".") {
+                return Err(storage_error(
+                    path,
+                    StorageOperation::Write,
+                    "No existing current directory",
+                ));
+            }
+            missing.push(ancestor.to_path_buf());
+            ancestor = ancestor
+                .parent()
+                .map(|parent| {
+                    if parent.as_os_str().is_empty() {
+                        Path::new(".")
+                    } else {
+                        parent
+                    }
+                })
+                .ok_or_else(|| {
+                    storage_error(path, StorageOperation::Write, "No existing source ancestor")
+                })?;
+        }
+        std::fs::create_dir_all(parent).map_err(|error| {
+            storage_error(
+                path,
+                StorageOperation::Write,
+                format!("Failed to create parent for '{path}': {error}"),
+            )
+        })?;
+        if !missing.is_empty() {
+            // Sync children before parents, including the existing ancestor
+            // whose new directory entry makes the entire chain reachable.
+            for directory in missing
+                .iter()
+                .map(PathBuf::as_path)
+                .chain(std::iter::once(ancestor))
+            {
+                self.check_durability_fault(DurabilityFaultPoint::ParentDirectorySync)?;
+                Self::sync_directory(path, directory)?;
+            }
         }
         Ok(())
     }
@@ -598,7 +670,7 @@ impl DurableStorageHost for FsStorageHost {
     }
 
     fn replace_durable(&self, path: &str, data: &str) -> Result<(), EngineError> {
-        Self::ensure_parent(path)?;
+        self.ensure_parent_durable(path)?;
         self.recover_durable_path(path)?;
         let (destination, parent, backup, committed) = Self::durable_artifacts(path)?;
         let filename = destination
