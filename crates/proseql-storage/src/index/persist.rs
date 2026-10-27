@@ -87,6 +87,22 @@ impl Store {
             prefixes: Arc::default(),
         }
     }
+    /// Isolate an attempt's checked-prefix memo from the committed store.
+    /// Ordinary Clone deliberately continues to share that memo.
+    pub fn fork(&self) -> Self {
+        // A poisoned memo is disposable: rebuild it instead of carrying
+        // uncertain cached evidence into an otherwise independent attempt.
+        let prefixes = self
+            .prefixes
+            .lock()
+            .map(|proofs| proofs.clone())
+            .unwrap_or_default();
+        Self {
+            root: self.root.clone(),
+            fingerprint: self.fingerprint,
+            prefixes: Arc::new(Mutex::new(prefixes)),
+        }
+    }
     pub fn clear(&self) {
         if let Ok(mut proofs) = self.prefixes.lock() {
             proofs.clear();
@@ -267,5 +283,39 @@ impl Store {
         let hash = checksum(&out);
         put(&mut out, hash);
         host.write_index_atomic(&path, &out);
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use super::*;
+    use crate::fs::FsStorageHost;
+    use std::time::Duration;
+
+    #[test]
+    fn fork_copies_prefix_proofs_without_changing_shared_clone_semantics() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("rows.jsonl");
+        std::fs::write(&path, "{\"id\":\"a\"}\n").unwrap();
+        let host = FsStorageHost::new_polling(Duration::from_secs(1)).unwrap();
+        let generation = SourceGeneration::observe(&host, path.to_str().unwrap())
+            .unwrap()
+            .unwrap();
+        let store = Store::new(dir.path().to_str().unwrap().into(), 7);
+        store.save(&host, &generation, "valid", &[]);
+        let before = format!("{store:?}");
+        let fork = store.fork();
+        assert_eq!(format!("{fork:?}"), before);
+        assert!(!Arc::ptr_eq(&store.prefixes, &fork.prefixes));
+        fork.clear();
+        assert!(fork.prefixes.lock().unwrap().is_empty());
+        assert_eq!(format!("{store:?}"), before);
+        assert!(fork.load(&host, &generation, "valid").is_some());
+        assert_eq!(format!("{store:?}"), before);
+        let shared = store.clone();
+        assert!(Arc::ptr_eq(&store.prefixes, &shared.prefixes));
+        shared.clear();
+        assert!(store.prefixes.lock().unwrap().is_empty());
+        assert!(!fork.prefixes.lock().unwrap().is_empty());
     }
 }

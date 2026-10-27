@@ -5,6 +5,10 @@
 //! after durable persistence. Source-mode batches replace files individually;
 //! a write-stage failure quarantines the runtime because a prefix can be durable.
 
+// Let unit tests reuse tests/support/parity.rs without copying its fixtures.
+#[cfg(test)]
+extern crate self as proseql_native;
+
 mod bounded;
 pub use bounded::BoundedQueryStats;
 mod callbacks;

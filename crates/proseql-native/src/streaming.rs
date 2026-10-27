@@ -34,6 +34,17 @@ use proseql_engine::query::pipeline::QueryInput;
 use proseql_engine::query::{CursorConfig, CursorPageResult};
 use serde_json::Value;
 
+#[cfg(test)]
+#[allow(dead_code)]
+#[path = "../tests/support/parity.rs"]
+mod validated_fixture;
+#[cfg(test)]
+#[path = "streaming_validated_race_tests.rs"]
+mod validated_race_tests;
+#[cfg(test)]
+#[path = "streaming_validated_tests.rs"]
+mod validated_tests;
+
 /// A read on one collection, as the public API received it.
 pub(crate) enum ReadRequest<'a> {
     /// `query`, `query_bounded`, `query_bounded_with_stats`.
@@ -82,6 +93,15 @@ impl NativeRuntime {
         collection: &str,
         request: ReadRequest<'_>,
     ) -> Option<Result<(ReadOutput, BoundedQueryStats), EngineError>> {
+        self.streaming_read_impl(collection, request, true)
+    }
+
+    fn streaming_read_impl(
+        &self,
+        collection: &str,
+        request: ReadRequest<'_>,
+        mut use_validation: bool,
+    ) -> Option<Result<(ReadOutput, BoundedQueryStats), EngineError>> {
         let mut state = match self.lock_open() {
             Ok(state) => state,
             Err(error) => return Some(Err(error)),
@@ -93,8 +113,9 @@ impl NativeRuntime {
         if !applies {
             return None;
         }
-        let result =
-            Some((|| {
+        loop {
+            let mut retry_validating = false;
+            let result = Some((|| {
                 use proseql_engine::query::indexes::IndexUsed;
                 use proseql_engine::scan::executor::{Executor, ScanOutput, ScanRequest};
                 let filter = match &request {
@@ -148,6 +169,15 @@ impl NativeRuntime {
                 let builtin = state.formats.borrowed_jsonl_compatible(&source.format);
                 let prepared_decoder =
                     proseql_engine::scan::decoder::SimpleDecoder::new(&config.schema);
+                let projection = prepared_decoder.as_ref().and_then(|decoder| {
+                    if !matches!(
+                        config.id_strategy,
+                        proseql_engine::descriptor::IdStrategy::Provided
+                    ) {
+                        return None;
+                    }
+                    decoder.projection(&executor.required_fields()?)
+                });
                 let seek = if builtin {
                     range_bounds(&descriptor, filter)
                 } else {
@@ -166,11 +196,16 @@ impl NativeRuntime {
                 let mut index_used = IndexUsed::None;
                 let mut identities = IdArena::default();
                 let mut ordinal = 0;
+                let mut read_indexes = crate::locate::read_indexes::ReadIndexes::default();
+                let mut torn_diagnostics = Vec::new();
+                let committed_indexes = &state.sources.as_ref().expect("source").lazy[collection]
+                    .stream
+                    .index;
                 for (partition, path) in paths.iter().enumerate() {
                     let file_seek = seek.filter(|(field, lower, upper)| {
                         !covers_partition(&source, path, field, *lower, *upper)
                     });
-                    let observed = if file_seek.is_some() {
+                    let observed = if file_seek.is_some() || (builtin && projection.is_some()) {
                         let Some(stat) = host.stat(path)? else {
                             continue;
                         };
@@ -186,32 +221,41 @@ impl NativeRuntime {
                         }
                         None
                     };
+                    let proven = if use_validation && projection.is_some() && builtin {
+                        match observed.as_ref() {
+                            Some(observed) => read_indexes.checked_validation(
+                                committed_indexes,
+                                host.as_ref(),
+                                path,
+                                observed,
+                            )?,
+                            None => false,
+                        }
+                    } else {
+                        false
+                    };
                     let range = match file_seek.zip(observed.as_ref()) {
-                        Some(((field, lower, upper), observed)) => state
-                            .sources
-                            .as_mut()
-                            .expect("source")
-                            .lazy
-                            .get_mut(collection)
-                            .expect("lazy")
-                            .stream
-                            .index
-                            // An optional index is not the error authority. If
-                            // building/refreshing it fails, scan canonically so
-                            // parse/ID/schema error precedence stays unchanged.
-                            .time_index(host.as_ref(), path, field, observed.clone())
+                        // An optional index is not the error authority. Failed
+                        // refreshes fall back to canonical scanning; no staged
+                        // metadata is committed unless the whole request succeeds.
+                        Some(((field, lower, upper), observed)) => read_indexes
+                            .time_index(
+                                committed_indexes,
+                                host.as_ref(),
+                                path,
+                                field,
+                                observed.clone(),
+                            )
                             .ok()
                             .flatten()
                             .and_then(|index| index.seek(lower, upper)),
                         None => None,
                     };
                     let mut pending_index = if let Some(((field, _, _), observed)) =
-                        file_seek.filter(|_| range.is_none()).zip(observed)
+                        file_seek.filter(|_| range.is_none()).zip(observed.clone())
                     {
-                        state.sources.as_ref().expect("source").lazy[collection]
-                            .stream
-                            .index
-                            .begin_time_index(path, field, observed)
+                        read_indexes
+                            .begin_time_index(committed_indexes, path, field, observed)
                             .ok()
                             .flatten()
                     } else {
@@ -230,6 +274,7 @@ impl NativeRuntime {
                     identities.scopes.push((partition, range));
                     stats.partitions_read += 1;
                     let file = proseql_storage::partitioned::file_source(&source, path);
+                    let mut uncertified_tail = false;
                     let partition_result = if !builtin {
                         (|| {
                             // Custom codecs retain their whole-document decode contract.
@@ -264,9 +309,7 @@ impl NativeRuntime {
                                 ordinal += 1;
                             }
                             if let Some(torn) = loaded.torn {
-                                let sources = state.sources.as_mut().expect("source");
-                                sources.torn.retain(|old| old.path != *path);
-                                sources.torn.push(torn);
+                                torn_diagnostics.push(torn);
                             }
                             Ok(())
                         })()
@@ -279,6 +322,45 @@ impl NativeRuntime {
                             range,
                             |bytes, final_unterminated, _line, offset| {
                                 use proseql_engine::scan::borrowed::BorrowedValue;
+                                // Whole-file validation may have ignored a torn final
+                                // fragment. Its proof never certifies that fragment as
+                                // a row; keep ordinary JSON/torn-line handling here.
+                                if final_unterminated {
+                                    uncertified_tail = true;
+                                } else if proven {
+                                    if let Some((borrowed, present)) =
+                                        prepared_decoder.as_ref().and_then(|decoder| {
+                                            decoder
+                                                .decode_proven_positioned(
+                                                    bytes,
+                                                    projection.expect("projection"),
+                                                )
+                                                .ok()
+                                        })
+                                    {
+                                        if let Some(id) =
+                                            borrowed.get("id").and_then(BorrowedValue::as_str)
+                                        {
+                                            if let Some(index) = pending_index.as_mut() {
+                                                let field = file_seek.expect("index field").0;
+                                                index.push_key(
+                                                    borrowed.get(field).map_or(
+                                                        Value::Null,
+                                                        BorrowedValue::to_owned,
+                                                    ),
+                                                    offset,
+                                                    final_unterminated,
+                                                );
+                                            }
+                                            identities.push(id, partition, offset);
+                                            executor.push_positioned(&borrowed, present, ordinal);
+                                            ordinal += 1;
+                                            return Ok(());
+                                        }
+                                    }
+                                    // A changed file can fail parsing even before the
+                                    // final generation check. Replay canonical errors.
+                                }
                                 let parsed = match &prepared_decoder {
                                     Some(decoder) => decoder
                                         .decode_positioned(bytes)
@@ -326,6 +408,9 @@ impl NativeRuntime {
                                             .get("id")
                                             .and_then(BorrowedValue::as_str)
                                             .expect("validated borrowed ID");
+                                        if final_unterminated {
+                                            uncertified_tail = false;
+                                        }
                                         identities.push(id, partition, offset);
                                         match decoded {
                                             Some(present) => executor
@@ -374,30 +459,46 @@ impl NativeRuntime {
                                     executor.push(&row, ordinal);
                                     ordinal += 1;
                                 }
+                                if final_unterminated && loaded.torn.is_none() {
+                                    uncertified_tail = false;
+                                }
                                 if loaded.torn.is_some() {
                                     let torn = torn_diagnostic(host.as_ref(), path, offset)?;
-                                    let sources = state.sources.as_mut().expect("source");
-                                    sources.torn.retain(|old| old.path != *path);
-                                    sources.torn.push(torn);
+                                    torn_diagnostics.push(torn);
                                 }
                                 Ok(())
                             },
                         )
                     };
                     if partition_result.is_ok() {
+                        if let Some(observed) = observed {
+                            if observed.check(host.as_ref())?
+                                != proseql_storage::generation::GenerationCheck::Unchanged
+                            {
+                                // None of this attempt's rows, folds or stats may
+                                // escape after a proof became stale. Retry the whole
+                                // request without proofs, under the same runtime lock.
+                                retry_validating = use_validation;
+                                return Err(EngineError::Operation(proseql_engine::errors::OperationError {
+                                    operation: "read".into(),
+                                    reason: "source-changed".into(),
+                                    message: format!("Source '{path}' changed while building its index; retry the operation"),
+                                }));
+                            }
+                            // A complete-generation record must not bless bytes
+                            // that canonical append decoding may have ignored.
+                            if range.is_none() && !uncertified_tail {
+                                read_indexes.stage_validation(path, observed);
+                            }
+                        }
                         if let Some(index) =
                             pending_index.and_then(|index| index.complete(host.as_ref()).ok())
                         {
-                            state
-                                .sources
-                                .as_mut()
-                                .expect("source")
-                                .lazy
-                                .get_mut(collection)
-                                .expect("lazy")
-                                .stream
-                                .index
-                                .publish_time_index(path, file_seek.expect("index field").0, index);
+                            read_indexes.stage_time_index(
+                                path,
+                                file_seek.expect("index field").0,
+                                index,
+                            );
                         }
                     }
                     if let Err(error) = partition_result {
@@ -466,21 +567,23 @@ impl NativeRuntime {
                     ScanOutput::Aggregate(result) => ReadOutput::Aggregate(result),
                     ScanOutput::Grouped(groups) => ReadOutput::Grouped(groups),
                 };
+                // Finish can still fail (for example an invalid cursor). Only
+                // a fully successful request may publish any derived state.
+                let sources = state.sources.as_mut().expect("source");
+                read_indexes
+                    .commit(&mut sources.lazy.get_mut(collection).expect("lazy").stream.index);
+                for torn in torn_diagnostics {
+                    sources.torn.retain(|old| old.path != torn.path);
+                    sources.torn.push(torn);
+                }
                 Ok((output, stats))
             })());
-        if result.as_ref().is_some_and(Result::is_err) {
-            state
-                .sources
-                .as_mut()
-                .expect("source")
-                .lazy
-                .get_mut(collection)
-                .expect("lazy")
-                .stream
-                .index
-                .scan_failed();
+            if retry_validating {
+                use_validation = false;
+                continue;
+            }
+            return result;
         }
-        result
     }
 }
 

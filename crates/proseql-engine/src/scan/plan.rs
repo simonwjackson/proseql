@@ -95,6 +95,30 @@ impl Filter {
                 .collect(),
         )
     }
+    pub fn required_fields(&self, fields: &mut Vec<String>) -> bool {
+        match self {
+            Self::All(children) => children.iter().all(|child| child.required_fields(fields)),
+            Self::And(children) | Self::Or(children) => children
+                .iter()
+                .flatten()
+                .all(|child| child.required_fields(fields)),
+            Self::Not(child) => child.required_fields(fields),
+            Self::Field(field, condition) => {
+                fields.push(field.name.clone());
+                match condition.as_object() {
+                    Some(ops) => ops.keys().all(|op| {
+                        matches!(
+                            op.as_str(),
+                            "$eq" | "$ne" | "$in" | "$nin" | "$gt" | "$gte" | "$lt" | "$lte"
+                        )
+                    }),
+                    None => true,
+                }
+            }
+            Self::Constant(_) => true,
+            Self::Unsupported => false,
+        }
+    }
     pub fn matches(&self, row: &PositionedRow<'_>) -> Option<bool> {
         match self {
             Self::All(children) => {

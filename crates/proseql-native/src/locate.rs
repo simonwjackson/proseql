@@ -16,6 +16,8 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+pub(crate) mod read_indexes;
+
 pub(crate) type RowVisitor<'a> =
     dyn FnMut(&str, &[u8], RowLocation, bool) -> Result<(), EngineError> + 'a;
 
@@ -156,6 +158,8 @@ impl IndexState {
         self.append_proofs.clear();
     }
 
+    /// Compatibility wrapper for callers that do not span a whole request.
+    #[cfg(test)]
     pub fn time_index(
         &mut self,
         host: &dyn StorageHost,
@@ -163,54 +167,12 @@ impl IndexState {
         field: &str,
         observed: SourceGeneration,
     ) -> Result<Option<&TimeIndex>, EngineError> {
-        if self.codec.as_ref().is_some_and(|codec| !codec.positional) {
-            return Ok(None);
-        }
-        let key = (path.to_owned(), field.to_owned());
-        if !self.times.contains_key(&key) {
-            if let Some(store) = &self.store {
-                // A payload-valid suffix can still duplicate an ID in the
-                // prefix. Without a checked full-file identity proof, decline
-                // grown sidecars and let the canonical scan check uniqueness.
-                if let Some(index) = TimeIndex::load(host, store, &observed, field, 32) {
-                    self.time_validated.insert(key.clone(), observed.clone());
-                    self.times.insert(key.clone(), index);
-                }
-            }
-        }
-        let proof = self.append_proof(path).cloned();
-        let mut clear_proof = false;
-        if let Some(index) = self.times.get_mut(&key) {
-            let previous = index.generation().cloned();
-            let refreshed = (|| {
-                if let Some(proof) = &proof {
-                    if index.extend_checked_append(
-                        host,
-                        &proof.before,
-                        &proof.after,
-                        proof.start,
-                    )? {
-                        if self.time_validated.get(&key) == Some(&proof.before) {
-                            self.time_validated.insert(key.clone(), proof.after.clone());
-                        }
-                        return Ok(());
-                    }
-                }
-                index.refresh_observed(host, observed)?;
-                clear_proof = previous.as_ref() != index.generation();
-                Ok::<_, EngineError>(())
-            })();
-            if let Err(error) = refreshed {
-                self.clear_append_proof(path);
-                return Err(error);
-            }
-        }
-        if clear_proof {
-            self.clear_append_proof(path);
-        }
+        let mut attempt = read_indexes::ReadIndexes::default();
+        let _ = attempt.time_index(self, host, path, field, observed)?;
+        attempt.commit(self);
         Ok(self
             .times
-            .get(&key)
+            .get(&(path.into(), field.into()))
             .filter(|index| index.seek(None, None).is_some()))
     }
 
@@ -241,10 +203,6 @@ impl IndexState {
                 .insert((path.into(), field.into()), generation.clone());
         }
         self.times.insert((path.into(), field.into()), index);
-    }
-
-    pub(crate) fn scan_failed(&mut self) {
-        self.time_validated.clear();
     }
 
     pub fn id_locator(

@@ -327,6 +327,65 @@ impl<'a> Executor<'a> {
         })
     }
 
+    /// Fields sufficient for a non-deferred scalar fold or simple projection.
+    /// Workspaces that may own a complete row keep the complete decoder.
+    pub fn required_fields(&self) -> Option<Vec<String>> {
+        let mut fields = vec!["id".into()];
+        if !self
+            .positioned_filter
+            .as_ref()
+            .is_none_or(|filter| filter.required_fields(&mut fields))
+        {
+            return None;
+        }
+        if self.order.is_some() && self.borrowed_ranks.is_none() {
+            return None;
+        }
+        fields.extend(self.rank_fields.iter().map(|field| field.name.clone()));
+        let config = match &self.workspace {
+            Workspace::Aggregate {
+                config,
+                deferred: None,
+                ..
+            } => *config,
+            Workspace::Grouped {
+                group_by,
+                config,
+                deferred: None,
+                ..
+            } => {
+                fields.extend(group_by.iter().cloned());
+                *config
+            }
+            Workspace::Query {
+                cursor: None,
+                sort,
+                rows,
+            } if sort.is_empty() && !matches!(rows, Rows::All(_)) => {
+                match self.input.select.as_ref()? {
+                    Value::Array(names) if !names.is_empty() => {
+                        for name in names {
+                            fields.push(name.as_str()?.into());
+                        }
+                    }
+                    Value::Object(names)
+                        if !names.is_empty()
+                            && names.values().all(|value| value == &Value::Bool(true)) =>
+                    {
+                        fields.extend(names.keys().cloned())
+                    }
+                    _ => return None,
+                }
+                return Some(fields);
+            }
+            _ => return None,
+        };
+        for names in [&config.sum, &config.avg, &config.min, &config.max] {
+            fields.extend(names.iter().cloned());
+        }
+        Some(fields)
+    }
+
     /// Borrowed scalar fast path. Unsupported operators/sort callbacks retain
     /// the canonical path, after the host has validated the complete row.
     pub fn push_borrowed(&mut self, row: &BorrowedValue<'_>, ordinal: u64) {

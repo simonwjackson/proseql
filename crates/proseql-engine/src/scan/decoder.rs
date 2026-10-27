@@ -72,7 +72,11 @@ impl<'a> SimpleDecoder<'a> {
         bytes: &'de [u8],
     ) -> Result<Option<(BorrowedValue<'de>, u128)>, serde_json::Error> {
         let mut decoder = serde_json::Deserializer::from_slice(bytes);
-        let mut value = RowSeed(self).deserialize(&mut decoder)?;
+        let mut value = RowSeed::<false> {
+            decoder: self,
+            needed: 0,
+        }
+        .deserialize(&mut decoder)?;
         decoder.end()?;
         let BorrowedValue::Object(values) = &mut value.0 else {
             return Ok(None);
@@ -97,42 +101,119 @@ impl<'a> SimpleDecoder<'a> {
         });
         Ok(Some(value))
     }
+
+    /// Only scalar, non-transforming layouts can omit unused values. Nested
+    /// structs require schema stripping even when their generation is valid.
+    pub fn projection(&self, fields: &[String]) -> Option<u128> {
+        fn scalar(schema: &SchemaNode) -> bool {
+            match schema {
+                SchemaNode::Str | SchemaNode::Num | SchemaNode::Bool => true,
+                SchemaNode::Optional(inner) | SchemaNode::NullOr(inner) => scalar(inner),
+                _ => false,
+            }
+        }
+        if !self.fields.iter().all(|field| scalar(&field.schema)) {
+            return None;
+        }
+        Some(
+            self.fields
+                .iter()
+                .enumerate()
+                .fold(0, |mask, (index, field)| {
+                    mask | if fields.iter().any(|name| name == &field.name) {
+                        1u128 << index
+                    } else {
+                        0
+                    }
+                }),
+        )
+    }
+
+    /// The caller must prove that these exact bytes already passed this schema
+    /// and must check the file generation again before returning an answer.
+    /// JSON framing is still decoded; unused values need no value allocation.
+    /// A file proof can include an ignored torn tail: final unterminated lines
+    /// must use ordinary validation/torn-line handling instead of this method.
+    pub fn decode_proven_positioned<'de>(
+        &'de self,
+        bytes: &'de [u8],
+        needed: u128,
+    ) -> Result<(BorrowedValue<'de>, u128), serde_json::Error> {
+        if let Some(value) = super::proven::decode(bytes, self.fields, needed, |name| {
+            let bucket = usize::from(name.as_bytes().first().copied().unwrap_or(0));
+            self.names[self.buckets[bucket]..self.buckets[bucket + 1]]
+                .iter()
+                .find(|(candidate, _)| *candidate == name)
+                .map(|(_, index)| *index)
+        }) {
+            return Ok(value);
+        }
+        let mut decoder = serde_json::Deserializer::from_slice(bytes);
+        let mut value = RowSeed::<true> {
+            decoder: self,
+            needed,
+        }
+        .deserialize(&mut decoder)?;
+        decoder.end()?;
+        if let BorrowedValue::Object(values) = &mut value.0 {
+            let mut index = 0;
+            values.retain(|_| {
+                let keep = value.1 & (1u128 << index) != 0;
+                index += 1;
+                keep
+            });
+        }
+        Ok(value)
+    }
 }
-struct RowSeed<'a>(&'a SimpleDecoder<'a>);
-impl<'de> DeserializeSeed<'de> for RowSeed<'de> {
+struct RowSeed<'a, const PROVEN: bool> {
+    decoder: &'a SimpleDecoder<'a>,
+    needed: u128,
+}
+impl<'de, const PROVEN: bool> DeserializeSeed<'de> for RowSeed<'de, PROVEN> {
     type Value = (BorrowedValue<'de>, u128);
     fn deserialize<D: Deserializer<'de>>(self, decoder: D) -> Result<Self::Value, D::Error> {
         decoder.deserialize_any(self)
     }
 }
-impl<'de> Visitor<'de> for RowSeed<'de> {
+impl<'de, const PROVEN: bool> Visitor<'de> for RowSeed<'de, PROVEN> {
     type Value = (BorrowedValue<'de>, u128);
     fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str("a row object")
     }
     fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
         let mut values: Vec<_> = self
-            .0
+            .decoder
             .fields
             .iter()
             .map(|field| (Cow::Borrowed(field.name.as_str()), BorrowedValue::Null))
             .collect();
         let mut seen = 0;
         while let Some(key) = map.next_key::<BorrowedValue<'de>>()? {
-            // Parse even unknown values: ignored-any permits overflowing JSON
-            // numbers that the canonical value decoder rejects before stripping.
-            let value = map.next_value::<BorrowedValue<'de>>()?;
-            if let Some(name) = key.as_str() {
+            // Keep the unproven parse identical to the canonical decoder.
+            // Const specialization removes proof/mask work from that path.
+            let value = if PROVEN {
+                None
+            } else {
+                Some(map.next_value::<BorrowedValue<'de>>()?)
+            };
+            let index = key.as_str().and_then(|name| {
                 let bucket = usize::from(name.as_bytes().first().copied().unwrap_or(0));
-                if let Some((_, index)) = self.0.names
-                    [self.0.buckets[bucket]..self.0.buckets[bucket + 1]]
+                self.decoder.names[self.decoder.buckets[bucket]..self.decoder.buckets[bucket + 1]]
                     .iter()
                     .find(|(candidate, _)| *candidate == name)
-                {
-                    let index = *index;
-                    values[index].1 = value;
-                    seen |= 1u128 << index;
-                }
+                    .map(|(_, index)| *index)
+            });
+            if let Some(index) =
+                index.filter(|index| !PROVEN || self.needed & (1u128 << index) != 0)
+            {
+                values[index].1 = match value {
+                    Some(value) => value,
+                    None => map.next_value::<BorrowedValue<'de>>()?,
+                };
+                seen |= 1u128 << index;
+            } else if PROVEN {
+                map.next_value::<serde::de::IgnoredAny>()?;
             }
         }
         Ok((BorrowedValue::Object(values), seen))
