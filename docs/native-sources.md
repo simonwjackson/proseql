@@ -138,10 +138,10 @@ nix develop --command cargo test --manifest-path crates/Cargo.toml -p proseql-vc
 | Measurement | Result |
 |---|---|
 | Input | 2,000 synthetic 3.0 cards with folded base64 PHOTO; 400,350,670 bytes total; maximum 200,177 bytes/file |
-| Open | 3,743.862 ms |
-| Full reload after one external edit | 3,769.171 ms |
-| Build | Cargo release, optimized; rustc 1.92.0; calcard 0.3.13 |
-| Environment | NixOS/Linux 6.18.17, x86_64; Intel Core i9-11900H @ 2.50 GHz; 8 logical CPUs exposed; 32,588,472 kB RAM |
+| Open | 2,226.581 ms |
+| Full reload after one external edit | 2,476.386 ms |
+| Build | Cargo release, optimized; calcard 0.3.13 |
+| Environment | AKA; NixOS/Linux 6.18.17, x86_64; AMD Ryzen 5 7600X 6-Core Processor; 12 logical CPUs |
 
 This is one warm generated-files run, not a latency guarantee, cold-cache test,
 or peak-memory measurement. Other host work can affect times. No acceptance
