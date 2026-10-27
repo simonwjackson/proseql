@@ -40,6 +40,15 @@ pub fn visit_lines(
     first_row: u64,
     mut visit: impl FnMut(&[u8], RowLocation, bool) -> Result<(), EngineError>,
 ) -> Result<(), EngineError> {
+    // Persisted counters must not overflow the framer even when every byte
+    // in the remaining window could produce a row.
+    if end
+        .checked_sub(start)
+        .and_then(|remaining| first_row.checked_add(remaining))
+        .is_none()
+    {
+        return Err(crate::generation::changed(path));
+    }
     let chunks = CheckedChunks {
         host,
         path,

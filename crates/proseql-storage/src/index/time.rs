@@ -77,7 +77,9 @@ impl TimeIndex {
         Self::load_validating(host, store, current, field, stride, None)
     }
 
-    /// A grown prefix needs canonical validation before its new keys can seek.
+    /// A grown prefix requires full suffix validation, including duplicate-ID
+    /// safety against the prefix. Native callers without that proof use `load`
+    /// and fall back to their canonical full-file scan on growth.
     pub fn load_validating(
         host: &dyn StorageHost,
         store: &super::persist::Store,
@@ -102,12 +104,39 @@ impl TimeIndex {
         );
         let (saved_field, saved_stride, entries, last, rows, resume, ordered): Payload =
             serde_json::from_slice(&loaded.payload).ok()?;
+        let covered_len = loaded.generation.covered_len;
         if saved_field != field
+            || stride == 0
             || saved_stride != stride
-            || resume > loaded.generation.covered_len
+            || rows > covered_len
+            || resume > covered_len
+            || (rows == 0) != last.is_none()
+            || entries.len() as u64 != rows.div_ceil(stride as u64)
             || entries
                 .iter()
-                .any(|(_, offset, row)| *offset >= loaded.generation.covered_len || *row >= rows)
+                .enumerate()
+                .any(|(position, (_, offset, row))| {
+                    (position as u64).checked_mul(stride as u64) != Some(*row)
+                        || *offset >= covered_len
+                        || *offset > resume
+                        || *row > *offset
+                })
+            || entries.windows(2).any(|pair| pair[0].1 >= pair[1].1)
+            || (ordered
+                && (entries.windows(2).any(|pair| {
+                    !matches!(
+                        compare(&pair[0].0, &pair[1].0),
+                        Some(Ordering::Less | Ordering::Equal)
+                    )
+                }) || entries
+                    .last()
+                    .zip(last.as_ref())
+                    .is_some_and(|(checkpoint, last)| {
+                        !matches!(
+                            compare(&checkpoint.0, last),
+                            Some(Ordering::Less | Ordering::Equal)
+                        )
+                    })))
         {
             return None;
         }
@@ -129,6 +158,9 @@ impl TimeIndex {
             if resume != loaded.generation.covered_len {
                 return None;
             }
+            // Bound every ordinal the framer may produce before passing a
+            // persisted row counter into traversal.
+            rows.checked_add(current.covered_len.checked_sub(resume)?)?;
             let validate = validate.as_mut()?;
             rows::visit_lines(
                 host,
@@ -182,6 +214,11 @@ impl TimeIndex {
     }
 
     pub fn push_key(&mut self, key: Value, offset: u64, final_line: bool) {
+        let Some(next_rows) = self.rows.checked_add(1) else {
+            self.ordered = false;
+            self.generation = None;
+            return;
+        };
         if final_line {
             self.resume = offset;
         }
@@ -200,7 +237,7 @@ impl TimeIndex {
             });
         }
         self.last = Some(key);
-        self.rows += 1;
+        self.rows = next_rows;
     }
 
     /// Do not publish offsets unless they still belong to the observed text.

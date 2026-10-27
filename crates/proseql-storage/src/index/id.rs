@@ -242,7 +242,8 @@ impl IdLocator {
         let rows = take(&mut bytes)?;
         let resume = take(&mut bytes)?;
         let count = usize::try_from(take(&mut bytes)?).ok()?;
-        if resume > len
+        if rows > len
+            || resume > len
             || count != bytes.len() / 24
             || !bytes.len().is_multiple_of(24)
             || count as u64 != rows
@@ -250,14 +251,23 @@ impl IdLocator {
             return None;
         }
         let mut entries = Vec::with_capacity(count);
+        let mut offsets = vec![u64::MAX; count];
         for _ in 0..count {
             let hash = take(&mut bytes)?;
             let offset = take(&mut bytes)?;
             let ordinal = take(&mut bytes)?;
-            if offset >= len || ordinal >= rows {
+            if offset >= len || offset > resume || ordinal >= rows || ordinal > offset {
                 return None;
             }
+            let slot = &mut offsets[usize::try_from(ordinal).ok()?];
+            if *slot != u64::MAX {
+                return None;
+            }
+            *slot = offset;
             entries.push((hash, offset, ordinal));
+        }
+        if offsets.windows(2).any(|pair| pair[0] >= pair[1]) {
+            return None;
         }
         Some((rows, resume, entries))
     }
@@ -428,7 +438,9 @@ impl IdLocator {
                 }
             };
             self.entry(file, &id, row);
-            count += 1;
+            count = count
+                .checked_add(1)
+                .ok_or_else(|| crate::generation::changed(&path))?;
             if final_line {
                 resume = row.offset;
             }
@@ -608,7 +620,7 @@ impl IdLocator {
         }
         let key = hash(id);
         let begin = self.entries.partition_point(|entry| entry.hash < key);
-        Ok(self.entries[begin..]
+        self.entries[begin..]
             .iter()
             .take_while(|entry| entry.hash == key)
             .chain(self.delta.iter().filter(|entry| entry.hash == key))
@@ -616,8 +628,11 @@ impl IdLocator {
                 let pos = location(entry, &self.wide);
                 let path = &self.files[pos.file as usize].path;
                 let preceding = self.files.iter().filter(|file| file.path < *path);
-                let first: u64 = preceding.clone().map(|file| file.rows).sum();
-                (
+                let first = preceding
+                    .clone()
+                    .try_fold(0u64, |total, file| total.checked_add(file.rows))
+                    .ok_or_else(|| crate::generation::changed(path))?;
+                Ok((
                     path.clone(),
                     RowLocation {
                         partition: preceding.count() as u32,
@@ -629,12 +644,14 @@ impl IdLocator {
                         ordinal: if pos.row == super::UNKNOWN_ORDINAL {
                             pos.row
                         } else {
-                            first + pos.row
+                            first
+                                .checked_add(pos.row)
+                                .ok_or_else(|| crate::generation::changed(path))?
                         },
                     },
-                )
+                ))
             })
-            .collect())
+            .collect()
     }
     pub fn record_appended(
         &mut self,
@@ -767,6 +784,11 @@ impl IdLocator {
             return Ok(());
         }
         let first = self.files[file].rows;
+        let row_count = u64::try_from(rows.len())
+            .ok()
+            .and_then(|count| first.checked_add(count))
+            .filter(|count| *count <= generation.covered_len)
+            .ok_or_else(|| crate::generation::changed(&generation.path))?;
         if self.files[file]
             .generation
             .as_ref()
@@ -785,13 +807,15 @@ impl IdLocator {
                 file as u32,
                 id,
                 RowLocation {
-                    ordinal: first + ordinal as u64,
+                    ordinal: first
+                        .checked_add(ordinal as u64)
+                        .ok_or_else(|| crate::generation::changed(&generation.path))?,
                     ..*row
                 },
             );
             self.delta.push(entry);
         }
-        self.files[file].rows = first + rows.len() as u64;
+        self.files[file].rows = row_count;
         self.files[file].resume = generation.covered_len;
         self.files[file].generation = Some(generation);
         if self.delta.len() >= APPEND_DELTA_LIMIT {

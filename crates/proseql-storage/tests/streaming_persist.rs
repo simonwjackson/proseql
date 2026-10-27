@@ -129,3 +129,80 @@ fn crash_before_rename_preserves_old_or_no_sidecar() {
         );
     }
 }
+
+#[test]
+fn crafted_persisted_counters_are_cache_misses_not_panics() {
+    let dir = tempfile::tempdir().unwrap();
+    let host = FsStorageHost::new_polling(Duration::from_secs(1)).unwrap();
+    let path = dir.path().join("one.jsonl").to_str().unwrap().to_owned();
+    let store = Store::new(dir.path().to_str().unwrap().into(), 1);
+    let kind = format!(
+        "time-{:016x}",
+        proseql_storage::index::persist::checksum(b"at")
+    );
+    for (rows, stride, checkpoints, last, resume) in [
+        (u64::MAX, 1, json!([]), json!(1), 36),
+        (1, 0, json!([[1, 0, 0]]), json!(1), 18),
+        (1, 1, json!([]), json!(1), 18),
+        (1, 1, json!([[1, 0, 0]]), json!(null), 18),
+        (2, 1, json!([[1, 0, 0], [2, 0, 1]]), json!(2), 36),
+        (2, 1, json!([[1, 0, 0], [2, 18, 0]]), json!(2), 36),
+    ] {
+        host.write(&path, "{\"id\":\"a\",\"at\":1}\n{\"id\":\"b\",\"at\":2}\n")
+            .unwrap();
+        let generation = SourceGeneration::observe(&host, &path).unwrap().unwrap();
+        let payload = serde_json::to_vec(&json!([
+            "at",
+            stride,
+            checkpoints,
+            last,
+            rows,
+            resume,
+            true
+        ]))
+        .unwrap();
+        store.save(&host, &generation, &kind, &payload);
+        host.append(&path, "{\"id\":\"c\",\"at\":3}\n").unwrap();
+        let current = SourceGeneration::observe(&host, &path).unwrap().unwrap();
+        let restored = TimeIndex::load_validating(
+            &host,
+            &store,
+            &current,
+            "at",
+            stride,
+            Some(&mut |_, _| Ok(())),
+        );
+        assert!(
+            restored.is_none(),
+            "crafted time metadata must not authorize traversal"
+        );
+        assert!(TimeIndex::build(&host, &path, "at", 1)
+            .unwrap()
+            .seek(Some(&json!(3)), None)
+            .is_some());
+    }
+    for (rows, entries) in [
+        (u64::MAX, vec![]),
+        (2, vec![(1, 0, 0), (2, 18, 0)]),
+        (2, vec![(1, 18, 0), (2, 0, 1)]),
+    ] {
+        let generation = SourceGeneration::observe(&host, &path).unwrap().unwrap();
+        let mut payload = Vec::new();
+        for value in [rows, generation.covered_len, entries.len() as u64] {
+            proseql_storage::index::persist::put(&mut payload, value);
+        }
+        for (hash, offset, row) in entries {
+            for value in [hash, offset, row] {
+                proseql_storage::index::persist::put(&mut payload, value);
+            }
+        }
+        store.save(&host, &generation, "ids", &payload);
+        let paths = [path.clone()];
+        let restored =
+            IdLocator::build_persisted(&host, &paths, &BTreeMap::new(), None, &store).unwrap();
+        let rebuilt = IdLocator::build(&host, &paths).unwrap();
+        for id in ["a", "b", "c", "missing"] {
+            assert_eq!(restored.locate(id).unwrap(), rebuilt.locate(id).unwrap());
+        }
+    }
+}

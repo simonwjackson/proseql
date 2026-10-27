@@ -73,7 +73,10 @@ format or a substitute for text backups.
 The little-endian versioned envelope contains magic, format/index versions,
 relative text path, covered byte length, trusted change token and modification
 time, a checked prefix hash, schema/config fingerprint, payload length and a
-checksum over the entire envelope/payload. An unchanged trusted generation
+checksum over the entire envelope/payload. Index version 2 rejects earlier
+round-4 sidecars, whose time-validation proof could omit duplicate checks.
+Persisted row counts, resume positions and checkpoint/locator locations are
+bounded and checked for consistency before traversal. An unchanged trusted generation
 needs metadata checks, not a text read. A grown file needs one checked hash
 read per distinct covered prefix, shared across sidecar kinds, followed by
 suffix scanning. Edits, truncation, replacement or mismatched prefixes rebuild

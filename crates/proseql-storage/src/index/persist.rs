@@ -10,7 +10,7 @@ pub const DIRECTORY: &str = ".proseql-index";
 const MAGIC: &[u8; 8] = b"PROSQLIX";
 const FORMAT: u64 = 1;
 // Bump when hashing, locator, validation or comparison semantics change.
-const INDEX: u64 = 1;
+const INDEX: u64 = 2;
 
 pub fn hidden(path: &str) -> bool {
     path.split(['/', '\\']).any(|part| part == DIRECTORY)
