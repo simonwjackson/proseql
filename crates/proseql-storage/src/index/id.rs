@@ -171,17 +171,19 @@ impl IdLocator {
             };
             let loaded = generation.as_ref().and_then(|current| {
                 store.and_then(|store| {
-                    // A validating build must visit membership-only files
-                    // before finish() reports any duplicate. Otherwise an ID
-                    // cache could reorder payload validation behind duplicates.
-                    if visit.is_some()
-                        && !store
-                            .load(host, current, "valid")
-                            .is_some_and(|valid| valid.payload.is_empty())
-                    {
-                        return None;
+                    let ids = store.load(host, current, "ids")?;
+                    // Before finish() reports duplicates, a validating build
+                    // must visit every byte not covered by validation. An older
+                    // valid prefix cannot authorize newer cached membership.
+                    if visit.is_some() {
+                        let valid = store.load(host, current, "valid")?;
+                        if !valid.payload.is_empty()
+                            || valid.generation.covered_len < ids.generation.covered_len
+                        {
+                            return None;
+                        }
                     }
-                    store.load(host, current, "ids")
+                    Some(ids)
                 })
             });
             let mut position = (0, 0);

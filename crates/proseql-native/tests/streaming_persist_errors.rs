@@ -156,3 +156,76 @@ fn membership_only_sidecars_never_reorder_validation_before_duplicate_errors() {
     assert_eq!(with, without);
     runtime.close().unwrap();
 }
+
+#[test]
+fn grown_time_sidecar_never_hides_a_suffix_id_duplicating_the_prefix() {
+    let fixture = ParityFixture::new(60);
+    let runtime = fixture.open(RuntimeKind::Lazy);
+    runtime.query_bounded(COLLECTION, range()).unwrap();
+    runtime.close().unwrap();
+    let path = fixture.partition_path("2025-02");
+    let mut duplicate = support::parity::sample("2025-02", 28, 1439, "steps");
+    duplicate["id"] = json!("steps:2025-02-03T00:00:00.000Z");
+    writeln!(
+        fs::OpenOptions::new().append(true).open(&path).unwrap(),
+        "{duplicate}"
+    )
+    .unwrap();
+    let runtime = fixture.open(RuntimeKind::Lazy);
+    let with = runtime.query_bounded(COLLECTION, range());
+    runtime.close().unwrap();
+    fs::remove_dir_all(path.parent().unwrap().join(".proseql-index")).unwrap();
+    let runtime = fixture.open(RuntimeKind::Lazy);
+    let without = runtime.query_bounded(COLLECTION, range());
+    assert!(without
+        .as_ref()
+        .unwrap_err()
+        .to_string()
+        .contains("Partition records need unique string IDs"));
+    assert_eq!(with, without);
+    runtime.close().unwrap();
+}
+
+#[test]
+fn older_validation_cannot_authorize_newer_invalid_membership() {
+    let fixture = ParityFixture::new(60);
+    let runtime = fixture.open(RuntimeKind::Lazy);
+    runtime.find_by_id(COLLECTION, "absent").unwrap();
+    runtime.close().unwrap();
+    let path = fixture.partition_path("2025-01");
+    let mut invalid = support::parity::sample("2025-01", 31, 1439, "steps");
+    invalid["id"] = json!("invalid-gap");
+    invalid["value"] = json!("bad");
+    writeln!(
+        fs::OpenOptions::new().append(true).open(&path).unwrap(),
+        "{invalid}"
+    )
+    .unwrap();
+    let runtime = fixture.open(RuntimeKind::Lazy);
+    let mut new = support::parity::sample("2025-03", 28, 1439, "steps");
+    new["id"] = json!("own");
+    runtime.mutate(|m| m.create(COLLECTION, new)).unwrap();
+    runtime.close().unwrap();
+    let mut duplicate = support::parity::sample("2025-02", 28, 1439, "steps");
+    duplicate["id"] = json!("steps:2025-01-01T00:00:00.000Z");
+    writeln!(
+        fs::OpenOptions::new()
+            .append(true)
+            .open(fixture.partition_path("2025-02"))
+            .unwrap(),
+        "{duplicate}"
+    )
+    .unwrap();
+    let runtime = fixture.open(RuntimeKind::Lazy);
+    let with = runtime.find_by_id(COLLECTION, "absent");
+    runtime.close().unwrap();
+    fs::remove_dir_all(path.parent().unwrap().join(".proseql-index")).unwrap();
+    let runtime = fixture.open(RuntimeKind::Lazy);
+    let without = runtime.find_by_id(COLLECTION, "absent");
+    assert!(matches!(
+        &without,
+        Err(proseql_engine::errors::EngineError::Validation(_))
+    ));
+    assert_eq!(with, without);
+    runtime.close().unwrap();
+}

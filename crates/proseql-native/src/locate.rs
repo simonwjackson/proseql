@@ -135,35 +135,11 @@ impl IndexState {
         }
         let key = (path.to_owned(), field.to_owned());
         if !self.times.contains_key(&key) {
-            if let (Some(store), Some(codec)) = (&self.store, &self.codec) {
-                let file = proseql_storage::partitioned::file_source(&codec.source, path);
-                let decoder = RowDecoder {
-                    collection: &codec.collection,
-                    storage: &codec.storage,
-                    source: &codec.source,
-                    callbacks: &codec.callbacks,
-                };
-                let mut validate = |bytes: &[u8], final_line: bool| {
-                    let mut terminated = Vec::new();
-                    let bytes = if final_line {
-                        bytes
-                    } else {
-                        terminated.extend_from_slice(bytes);
-                        terminated.push(b'\n');
-                        &terminated
-                    };
-                    decoder
-                        .decode_row(host, &codec.formats, &file, bytes)
-                        .map(|_| ())
-                };
-                if let Some(index) = TimeIndex::load_validating(
-                    host,
-                    store,
-                    &observed,
-                    field,
-                    32,
-                    Some(&mut validate),
-                ) {
+            if let Some(store) = &self.store {
+                // A payload-valid suffix can still duplicate an ID in the
+                // prefix. Without a checked full-file identity proof, decline
+                // grown sidecars and let the canonical scan check uniqueness.
+                if let Some(index) = TimeIndex::load(host, store, &observed, field, 32) {
                     self.time_validated.insert(key.clone(), observed.clone());
                     self.times.insert(key.clone(), index);
                 }

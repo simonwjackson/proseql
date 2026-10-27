@@ -671,12 +671,14 @@ including collisions verified against text. A stale or missing sidecar cannot
 make a duplicate create succeed. Reads still decode/validate candidate records.
 Validation records certify only the checked text generation under the saved
 schema/config fingerprint. Loading membership without a validation record does
-not bypass payload validation or validation-before-duplicate precedence.
+not bypass payload validation or validation-before-duplicate precedence. Its
+checked validation prefix must cover the cached membership prefix; otherwise
+the locator scans that file and validates the uncovered gap before merging.
 
 Time sidecars are eligible only after whole-file canonical validation succeeded
 under that fingerprint. A failed read disables pending time publication. A
-grown time sidecar requires canonical validation of its new suffix before
-seeking; failure falls back to the canonical full scan and its original error.
+grown time sidecar falls back to the canonical full-file scan: payload validation
+of the suffix alone cannot prove that its IDs are unique against the prefix.
 Existing in-memory safe-seek semantics remain unchanged. Tests compare invalid
 original and appended payload errors with and without sidecars.
 
