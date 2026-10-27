@@ -2,7 +2,11 @@
 //! retain the existing length+tail conflict contract and a whole-file watcher
 //! fingerprint, not another partition-sized source buffer.
 use crate::lazy::FileFingerprint;
-use proseql_storage::append::{plan_append, PlannedAppend, TornLineDiagnostic};
+use proseql_engine::errors::EngineError;
+use proseql_storage::append::{
+    jsonl_tail_bytes, plan_append, JsonlTail, PlannedAppend, TornLineDiagnostic,
+};
+use proseql_storage::host::StorageHost;
 use std::{collections::hash_map::DefaultHasher, hash::Hasher};
 
 pub(crate) const APPEND_CONFLICT_TAIL: usize = 4096;
@@ -40,7 +44,8 @@ fn suffix(bytes: &[u8]) -> Vec<u8> {
 }
 fn extend_tail(tail: &mut Vec<u8>, data: &[u8]) {
     if data.len() >= APPEND_CONFLICT_TAIL {
-        *tail = suffix(data);
+        tail.clear();
+        tail.extend_from_slice(&data[data.len() - APPEND_CONFLICT_TAIL..]);
     } else {
         let discard = (tail.len() + data.len()).saturating_sub(APPEND_CONFLICT_TAIL);
         tail.drain(..discard);
@@ -48,7 +53,115 @@ fn extend_tail(tail: &mut Vec<u8>, data: &[u8]) {
     }
 }
 
+/// Build a resumable hash and conflict tails without retaining the partition.
+/// Only the final physical line can grow beyond the fixed chunk/tail buffers.
+#[derive(Default)]
+struct AppendBuilder {
+    len: usize,
+    tail: Vec<u8>,
+    hash: DefaultHasher,
+    keep_len: usize,
+    kept_tail: Vec<u8>,
+    kept_hash: DefaultHasher,
+    final_line: Vec<u8>,
+}
+
+impl AppendBuilder {
+    fn push(&mut self, bytes: &[u8]) {
+        if let Some(last) = bytes.iter().rposition(|byte| *byte == b'\n') {
+            let complete = &bytes[..=last];
+            self.hash.write(complete);
+            extend_tail(&mut self.tail, complete);
+            self.keep_len = self.len + complete.len();
+            self.kept_hash = self.hash.clone();
+            self.kept_tail.clone_from(&self.tail);
+            self.final_line.clear();
+            self.final_line.extend_from_slice(&bytes[last + 1..]);
+            self.hash.write(&bytes[last + 1..]);
+            extend_tail(&mut self.tail, &bytes[last + 1..]);
+        } else {
+            self.hash.write(bytes);
+            extend_tail(&mut self.tail, bytes);
+            self.final_line.extend_from_slice(bytes);
+        }
+        self.len += bytes.len();
+    }
+
+    fn finish(self, path: &str, newlines: usize) -> (StoredFile, Option<TornLineDiagnostic>) {
+        let torn = matches!(jsonl_tail_bytes(&self.final_line), JsonlTail::Torn { .. });
+        let diagnostic = torn.then(|| TornLineDiagnostic {
+            path: path.into(),
+            line: newlines + 1,
+            bytes: self.len - self.keep_len,
+            message: format!(
+                "Ignored an interrupted append in '{path}'; the next append removes it"
+            ),
+        });
+        let fingerprint = FileFingerprint::from_hash(self.len, self.hash.finish());
+        let (keep_len, kept_tail, kept_hash) = if torn {
+            (self.keep_len, self.kept_tail, self.kept_hash)
+        } else {
+            (self.len, self.tail.clone(), self.hash)
+        };
+        (
+            StoredFile::Append(Box::new(AppendBaseline {
+                len: self.len,
+                tail: self.tail,
+                keep_len,
+                kept_tail,
+                kept_hash,
+                fingerprint,
+                unterminated: !torn && !self.final_line.is_empty(),
+            })),
+            diagnostic,
+        )
+    }
+}
+
 impl StoredFile {
+    pub fn append_stream(
+        host: &dyn StorageHost,
+        path: &str,
+    ) -> Result<(Self, Option<TornLineDiagnostic>), EngineError> {
+        let mut builder = AppendBuilder::default();
+        host.visit_bytes(path, &mut |bytes| {
+            builder.push(bytes);
+            Ok(())
+        })?;
+        // Counting physical lines is needed only for a torn diagnostic. Do not
+        // add another byte scan to every healthy target's baseline preparation.
+        let mut newlines = 0;
+        if matches!(
+            jsonl_tail_bytes(&builder.final_line),
+            JsonlTail::Torn { .. }
+        ) {
+            let before = host.stat(path)?;
+            let mut remaining = builder.len;
+            let mut extra = false;
+            let mut hash = DefaultHasher::new();
+            host.visit_bytes(path, &mut |bytes| {
+                extra |= bytes.len() > remaining;
+                let bytes = &bytes[..bytes.len().min(remaining)];
+                remaining -= bytes.len();
+                hash.write(bytes);
+                newlines += bytes.iter().filter(|byte| **byte == b'\n').count();
+                Ok(())
+            })?;
+            if before.is_none_or(|stat| stat.len != builder.len as u64)
+                || remaining != 0
+                || extra
+                || hash.finish() != builder.hash.finish()
+                || host.stat(path)? != before
+            {
+                return Err(crate::operation_error(
+                    "source-changed",
+                    format!("File '{path}' changed since load; reload before retrying"),
+                ));
+            }
+        }
+        Ok(builder.finish(path, newlines))
+    }
+
     pub fn append(bytes: &[u8], torn: Option<&TornLineDiagnostic>) -> Self {
         let keep_len = torn.map_or(bytes.len(), |torn| bytes.len() - torn.bytes);
         let mut kept_hash = DefaultHasher::new();
@@ -131,6 +244,75 @@ impl StoredFile {
 mod tests {
     use super::*;
     use proseql_storage::append::{jsonl_tail_bytes, JsonlTail};
+
+    #[test]
+    fn streamed_baselines_match_captured_bytes_across_chunk_boundaries() {
+        let long = format!("{{\"id\":\"{}\"}}", "x".repeat(2 * 65536 + 7));
+        let cases = [
+            Vec::new(),
+            b"\n\n".to_vec(),
+            b"{\"id\":\"a\"}\n".to_vec(),
+            b"{\"id\":\"a\"}".to_vec(),
+            b"{\"id\":\"a\"}\n{\"id\":".to_vec(),
+            b"\n{\"id\":\"a\"}\n{\"id\":\"\xc3".to_vec(),
+            format!("{long}\n{{\"id\":").into_bytes(),
+            format!("{{\"id\":\"a\"}}\n{{\"id\":\"{}", "x".repeat(65536 + 17)).into_bytes(),
+            format!("{long}\n{long}").into_bytes(),
+            format!("{long}\n{long}\n").into_bytes(),
+        ];
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("rows.jsonl");
+        let host =
+            proseql_storage::fs::FsStorageHost::new_polling(std::time::Duration::from_secs(3600))
+                .unwrap();
+        for raw in cases {
+            let torn = match jsonl_tail_bytes(&raw) {
+                JsonlTail::Torn { keep, line } => Some(TornLineDiagnostic {
+                    path: "file".into(),
+                    line,
+                    bytes: raw.len() - keep,
+                    message: String::new(),
+                }),
+                _ => None,
+            };
+            std::fs::write(&path, &raw).unwrap();
+            let (actual, diagnostic) =
+                StoredFile::append_stream(&host, path.to_str().unwrap()).unwrap();
+            assert_eq!(
+                actual.fingerprint(),
+                StoredFile::append(&raw, torn.as_ref()).fingerprint()
+            );
+            assert_eq!(
+                diagnostic.as_ref().map(|d| (d.line, d.bytes)),
+                torn.as_ref().map(|d| (d.line, d.bytes))
+            );
+            for size in [1, 7, 4096, 65535, 65536, 65537] {
+                let mut builder = AppendBuilder::default();
+                for bytes in raw.chunks(size) {
+                    builder.push(bytes);
+                }
+                let (mut streamed, diagnostic) =
+                    builder.finish("file", raw.iter().filter(|byte| **byte == b'\n').count());
+                let mut captured = StoredFile::append(&raw, torn.as_ref());
+                assert_eq!(
+                    diagnostic.as_ref().map(|d| (d.line, d.bytes)),
+                    torn.as_ref().map(|d| (d.line, d.bytes))
+                );
+                for lines in ["{\"id\":\"new\"}\n", "{\"id\":\"next\"}\n"] {
+                    assert_eq!(streamed.len(), captured.len());
+                    assert_eq!(streamed.fingerprint(), captured.fingerprint());
+                    let StoredFile::Append(expected) = &captured else {
+                        unreachable!()
+                    };
+                    assert!(streamed.ends_with(&expected.tail));
+                    let plan = streamed.plan("file", lines.into());
+                    assert_eq!(plan, captured.plan("file", lines.into()));
+                    streamed.apply(&plan);
+                    captured.apply(&plan);
+                }
+            }
+        }
+    }
 
     #[test]
     fn compact_baselines_plan_and_track_identical_bytes_through_repeated_appends() {

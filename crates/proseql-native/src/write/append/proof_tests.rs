@@ -1,5 +1,5 @@
 //! Post-commit bookkeeping through a counted, tokenless real filesystem host.
-use super::record_committed;
+use super::{record_committed, CheckedAppend};
 use crate::{locate::IndexState, stored_file::StoredFile};
 use indexmap::IndexMap;
 use proseql_engine::errors::EngineError;
@@ -15,6 +15,7 @@ struct TokenlessFs {
     inner: FsStorageHost,
     bytes: AtomicU64,
     edit_at: AtomicU64,
+    trusted: bool,
 }
 impl StorageHost for TokenlessFs {
     fn supports_indexes(&self) -> bool {
@@ -50,8 +51,10 @@ impl StorageHost for TokenlessFs {
     fn stat(&self, path: &str) -> Result<Option<FileStat>, EngineError> {
         Ok(self.inner.stat(path)?.map(|mut stat| {
             // Force content-only checks even for an in-place same-length edit.
-            stat.change_id = None;
-            stat.modified_ns = None;
+            if !self.trusted {
+                stat.change_id = None;
+                stat.modified_ns = None;
+            }
             stat
         }))
     }
@@ -113,15 +116,20 @@ struct ProofFixture {
     contents: IndexMap<String, StoredFile>,
     len: u64,
     suffix_len: u64,
+    suffix: String,
 }
 impl ProofFixture {
     fn new(rows: usize) -> Self {
+        Self::with_trust(rows, false)
+    }
+    fn with_trust(rows: usize, trusted: bool) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("rows.jsonl").to_string_lossy().into_owned();
         let host = TokenlessFs {
             inner: FsStorageHost::new_polling(Duration::from_secs(3600)).unwrap(),
             bytes: AtomicU64::new(0),
             edit_at: AtomicU64::new(u64::MAX),
+            trusted,
         };
         let payload = "x".repeat(128);
         let text = (0..rows)
@@ -149,6 +157,7 @@ impl ProofFixture {
             contents: IndexMap::from([(path, stored)]),
             len,
             suffix_len,
+            suffix: plan.data,
         }
     }
     fn record(&mut self) -> Result<(), EngineError> {
@@ -159,6 +168,54 @@ impl ProofFixture {
             &self.contents,
             &IndexMap::new(),
         )
+    }
+}
+
+#[test]
+fn checked_suffix_avoids_text_reread_but_keeps_the_fresh_path_check() {
+    for edit in [false, true] {
+        let mut fixture = ProofFixture::with_trust(1000, true);
+        let path = fixture.starts.first().unwrap().0.clone();
+        let generation =
+            proseql_storage::generation::SourceGeneration::observe(&fixture.host, &path)
+                .unwrap()
+                .unwrap();
+        let checked = IndexMap::from([(
+            path.clone(),
+            CheckedAppend {
+                generation,
+                data: fixture.suffix.clone(),
+            },
+        )]);
+        if edit {
+            use std::io::{Seek, SeekFrom, Write};
+            let mut file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+            file.seek(SeekFrom::Start(7)).unwrap();
+            file.write_all(b"z").unwrap();
+        }
+        let result = record_committed(
+            &mut fixture.index,
+            &fixture.host,
+            &fixture.starts,
+            &fixture.contents,
+            &checked,
+        );
+        assert_eq!(fixture.host.bytes.load(Ordering::SeqCst), 0);
+        if edit {
+            assert!(
+                matches!(result.unwrap_err(), EngineError::Operation(ref error) if error.reason == "source-changed")
+            );
+        } else {
+            result.unwrap();
+            let locations = fixture
+                .index
+                .id_locator_if_built()
+                .unwrap()
+                .locate("new")
+                .unwrap();
+            assert_eq!(locations.len(), 1);
+            assert_eq!(locations[0].1.offset, fixture.starts[0]);
+        }
     }
 }
 

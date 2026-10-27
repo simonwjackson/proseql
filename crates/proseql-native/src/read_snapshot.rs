@@ -26,6 +26,9 @@ fn write_error() -> EngineError {
 }
 
 impl StorageHost for ReadSnapshot<'_> {
+    // Keep visit_bytes's read_bytes default: forwarding it would bypass these
+    // captured load bytes. Mutation append preparation uses the runtime's
+    // durable host directly, not this load-only snapshot.
     fn supports_indexes(&self) -> bool {
         self.host.supports_indexes()
     }

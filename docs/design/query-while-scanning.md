@@ -197,6 +197,46 @@ quarantine, duplicate equality/error rules and the 13 guarantees above do not
 change. The [round-3 write report](../benchmarks/query-while-scanning-write-round3.md)
 records the measurements and every remaining append miss.
 
+### Round-5 append evidence limit
+
+The requested no-prefix-read shortcut is **not implemented**. A trusted token
+and length equal to the generation recorded after the previous own append can
+rule out an intervening edit only up to the new append descriptor's `before`
+observation. They cannot prove preservation across the new write. An external
+same-length prefix edit after that observation and before the post-sync
+read-back changes the token, but our own suffix writes also change it. The final
+token does not identify which bytes changed. Even a suffix read-back plus an
+unchanged token across that read-back can bless the edited prefix. The
+`prefix_edit_during_durable_append_is_not_blessed_by_the_postcommit_token`
+AppendSync regression covers that window. A saved finished hash is not evidence
+that the current prefix still has that hash.
+
+Fs therefore still reads and hashes the kept prefix after every durable append,
+compares it with the checked pre-append baseline, verifies the exact suffix and
+checks the path generation before publishing derived coverage. Reusing the
+verified suffix bytes for locator bookkeeping removes a second suffix open/read;
+it does not remove that final fresh generation check. Missing or rejected append
+evidence keeps the canonical text proof and suffix read.
+
+One runtime must own writable paths. Checks do not enforce that rule. An external
+edit after the final generation check and before metadata publication remains
+possible; the next operation freshly checks the generation. The proposed shortcut
+would widen that residual window to the write itself, so the single-writer rule
+alone does not justify it while retaining existing edit regressions. Unblocking
+it requires OS-enforced exclusive write ownership that every writer honours, or
+filesystem per-range change information. Neither is approved or added here.
+
+Append baseline construction now visits bounded chunks through one Fs descriptor
+and retains only the conflict tails, resumable hash and final physical line.
+Only a torn file needs a second bounded pass to count physical lines for its
+diagnostic. That pass counts only the originally covered bytes and checks length,
+hash and metadata against the captured baseline; changed bytes fail closed. It
+still reads and hashes healthy target bytes once on first preparation; a finished saved
+hash cannot resume `DefaultHasher`. The additive `StorageHost::visit_bytes`
+default preserves `read_bytes` semantics and allocation. Load-only `ReadSnapshot`
+keeps that default to preserve captured bytes; runtime mutation preparation uses
+the durable host directly. No durability, duplicate or error guarantee changes.
+
 Item 3 describes validation, not zero I/O: append preparation can read target bytes for fingerprints/torn-tail handling. Custom codecs retain whole-partition validation. Item 12 preserves watch deliveries, not a hidden copy of every previously read file. A scan detects duplicates across its visited scope; there is no outside-scope resident cache to add historical rows to that scope. Global create checks use the locator.
 
 ## Measured costs, not SQLite qualification

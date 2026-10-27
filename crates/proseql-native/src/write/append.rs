@@ -19,8 +19,7 @@ use crate::{MutationInner, RuntimeState};
 use indexmap::IndexMap;
 use proseql_engine::collection::CreateManyResult;
 use proseql_engine::errors::{EngineError, SerializationError};
-use proseql_engine::scan::RowLocation;
-use proseql_storage::append::{jsonl_tail_bytes, JsonlTail, TornLineDiagnostic};
+use proseql_engine::scan::{RowLocation, RowSource, SliceLines};
 use proseql_storage::generation::{GenerationCheck, SourceGeneration};
 use proseql_storage::host::StorageHost;
 use proseql_storage::index::rows;
@@ -37,7 +36,14 @@ pub(crate) struct AppendState {
     targets: Vec<(String, Option<SourceGeneration>)>,
     /// Where the next durable append starts, including a possible separator.
     starts: IndexMap<String, u64>,
-    identities: IndexMap<String, SourceGeneration>,
+    identities: IndexMap<String, CheckedAppend>,
+}
+
+/// The suffix was compared byte-for-byte through the synced append descriptor.
+/// Its generation still needs a fresh path check before index publication.
+struct CheckedAppend {
+    generation: SourceGeneration,
+    data: String,
 }
 
 impl AppendState {
@@ -127,7 +133,7 @@ fn resolve_id(
 }
 
 /// Capture conflict generations before staging anything in the engine. A
-/// compact baseline costs one target-file byte buffer, never resident rows.
+/// compact baseline uses bounded chunks plus the final line, never resident rows.
 fn prepare(
     inner: &mut MutationInner<'_>,
     collection: &str,
@@ -148,19 +154,8 @@ fn prepare(
         }
         let generation = SourceGeneration::observe(access.host, &path)?;
         let content = if generation.is_some() && !access.sources.contents.contains_key(&path) {
-            let bytes = access.host.read_bytes(&path)?;
-            let torn = match jsonl_tail_bytes(&bytes) {
-                JsonlTail::Torn { keep, line } => Some(TornLineDiagnostic {
-                    path: path.clone(),
-                    line,
-                    bytes: bytes.len() - keep,
-                    message: format!(
-                        "Ignored an interrupted append in '{path}'; the next append removes it"
-                    ),
-                }),
-                _ => None,
-            };
-            let content = crate::stored_file::StoredFile::append(&bytes, torn.as_ref());
+            let (content, torn) =
+                crate::stored_file::StoredFile::append_stream(access.host, &path)?;
             if let Some(torn) = torn {
                 if !access.sources.torn.iter().any(|old| old.path == path) {
                     access.sources.torn.push(torn);
@@ -316,12 +311,20 @@ fn finish_create(
         .stream
         .append;
     if let Ok(rows) = result {
+        let borrowed = borrowed.iter().map(String::as_str).collect::<HashSet<_>>();
+        let mut staged = append
+            .ids
+            .iter()
+            .map(String::as_str)
+            .collect::<HashSet<_>>();
+        let mut added = Vec::new();
         for row in rows {
             let id = row["id"].as_str().expect("engine create ID");
-            if !borrowed.iter().any(|old| old == id) && !append.ids.iter().any(|old| old == id) {
-                append.ids.push(id.to_owned());
+            if !borrowed.contains(id) && staged.insert(id) {
+                added.push(id.to_owned());
             }
         }
+        append.ids.extend(added);
     }
     // This cannot fail: the engine collection exists and these moves cannot
     // enter its journal or notify watches. Also runs when callers catch errors.
@@ -364,7 +367,10 @@ pub(crate) fn commit(
         {
             lazy.stream.append.identities.insert(
                 write.path.clone(),
-                SourceGeneration::observe_stat(host, &write.path, identity.after)?,
+                CheckedAppend {
+                    generation: SourceGeneration::observe_stat(host, &write.path, identity.after)?,
+                    data: write.data.clone(),
+                },
             );
         }
     }
@@ -386,7 +392,7 @@ fn record_committed(
     host: &dyn StorageHost,
     starts: &IndexMap<String, u64>,
     contents: &IndexMap<String, crate::stored_file::StoredFile>,
-    identities: &IndexMap<String, SourceGeneration>,
+    identities: &IndexMap<String, CheckedAppend>,
 ) -> Result<(), EngineError> {
     let _bookkeeping = proseql_storage::diagnostics::span("streaming_append_bookkeeping");
     if index.id_locator_if_built().is_none() {
@@ -395,7 +401,7 @@ fn record_committed(
     for (path, start) in starts {
         let generation = identities
             .get(path)
-            .cloned()
+            .map(|checked| checked.generation.clone())
             .map_or_else(
                 || SourceGeneration::observe(host, path),
                 |generation| Ok(Some(generation)),
@@ -445,20 +451,34 @@ fn record_committed(
             }
         }
         let mut appended = Vec::new();
-        rows::visit_lines(
-            host,
-            path,
-            *start,
-            generation.covered_len,
-            0,
-            |bytes, location, _| {
-                let record: Value = serde_json::from_slice(bytes).map_err(json_error)?;
-                if let Some(id) = record.get("id").and_then(Value::as_str) {
-                    appended.push((id.to_owned(), location));
-                }
-                Ok(())
-            },
-        )?;
+        let mut visit = |bytes: &[u8], location: RowLocation| {
+            let record: Value = serde_json::from_slice(bytes).map_err(json_error)?;
+            if let Some(id) = record.get("id").and_then(Value::as_str) {
+                appended.push((id.to_owned(), location));
+            }
+            Ok(())
+        };
+        if let Some(checked) = identities.get(path) {
+            // Reuse only the exact bytes verified by append_identity. Without
+            // that evidence (including prefix or suffix edits), read the text.
+            let mut lines = SliceLines::new(checked.data.as_bytes(), 0, 0);
+            while let Some(row) = lines.next_row()? {
+                let mut location = row.location;
+                location.offset = start.checked_add(location.offset).ok_or_else(|| {
+                    crate::operation_error("source-changed", "Append location overflow")
+                })?;
+                visit(row.bytes, location)?;
+            }
+        } else {
+            rows::visit_lines(
+                host,
+                path,
+                *start,
+                generation.covered_len,
+                0,
+                |bytes, location, _| visit(bytes, location),
+            )?;
+        }
         if generation.check(host)? != GenerationCheck::Unchanged {
             return Err(crate::operation_error(
                 "source-changed",

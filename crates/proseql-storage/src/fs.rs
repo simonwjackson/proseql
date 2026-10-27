@@ -399,7 +399,10 @@ impl FsStorageHost {
         data: &str,
         prove: bool,
     ) -> Result<Option<AppendIdentity>, EngineError> {
-        Self::ensure_parent(path)?;
+        // Preserve ensure_parent's existing extensionless-path behaviour.
+        if Path::new(path).extension().is_none() {
+            Self::ensure_parent(path)?;
+        }
         self.recover_durable_path(path)?;
         let destination = PathBuf::from(path);
         let parent = destination
@@ -409,12 +412,24 @@ impl FsStorageHost {
             .to_path_buf();
         let created = !destination.exists();
         let write_error = |message: String| storage_error(path, StorageOperation::Write, message);
-        let mut file = std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(&destination)
+        let open = || {
+            std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .truncate(false)
+                .open(&destination)
+        };
+        // Existing append targets already have a parent. Avoid one mkdir
+        // syscall per touched shard; still create missing parents on demand.
+        let opened = match open() {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                Self::ensure_parent(path)?;
+                open()
+            }
+            result => result,
+        };
+        let mut file = opened
             .map_err(|error| write_error(format!("Failed to open '{path}' for append: {error}")))?;
         let before = file_stat(
             &file
@@ -845,6 +860,33 @@ impl StorageHost for FsStorageHost {
                 format!("Failed to read '{path}': {error}"),
             )
         })
+    }
+
+    fn visit_bytes(
+        &self,
+        path: &str,
+        visitor: &mut dyn FnMut(&[u8]) -> Result<(), EngineError>,
+    ) -> Result<(), EngineError> {
+        self.recover_durable_path(path)?;
+        let read_error = |error| {
+            storage_error(
+                path,
+                StorageOperation::Read,
+                format!("Failed to read '{path}': {error}"),
+            )
+        };
+        let mut file = std::fs::File::open(path).map_err(read_error)?;
+        let mut buffer = [0; 64 * 1024];
+        loop {
+            let count = match file.read(&mut buffer) {
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                result => result.map_err(read_error)?,
+            };
+            if count == 0 {
+                return Ok(());
+            }
+            visitor(&buffer[..count])?;
+        }
     }
 
     fn read_range(&self, path: &str, offset: u64, len: usize) -> Result<Vec<u8>, EngineError> {

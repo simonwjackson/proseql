@@ -73,6 +73,20 @@ pub trait StorageHost: Send + Sync {
     fn read_bytes(&self, path: &str) -> Result<Vec<u8>, EngineError> {
         self.read(path).map(String::into_bytes)
     }
+    /// Visit raw file bytes in order, in chunks of at most 64 KiB. A visitor
+    /// error stops the read and is returned unchanged. This is not a snapshot
+    /// or generation proof. The default retains `read_bytes` semantics (and
+    /// its allocation); filesystem hosts can reuse one descriptor and buffer.
+    fn visit_bytes(
+        &self,
+        path: &str,
+        visitor: &mut dyn FnMut(&[u8]) -> Result<(), EngineError>,
+    ) -> Result<(), EngineError> {
+        for bytes in self.read_bytes(path)?.chunks(64 * 1024) {
+            visitor(bytes)?;
+        }
+        Ok(())
+    }
     /// Read at most `len` bytes starting at byte `offset`. A short result
     /// means end of file. Query-while-scanning readers use it to keep memory
     /// bounded. The default reads the whole file and slices it, which is

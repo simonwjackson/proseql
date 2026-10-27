@@ -470,6 +470,21 @@ coverage. The prefix is still read once; only separate post-commit prefix reads,
 opens and recovery probes are removed. Torn baselines conservatively keep the
 old proof. A read-back failure discards evidence, not a durable success.
 
+Baseline preparation now streams chunks through one Fs descriptor instead of
+allocating the whole target file. It retains the resumable hash, two conflict
+tails and the final physical line needed for torn-line classification. Custom
+hosts have a safe `StorageHost::visit_bytes` default over `read_bytes`; override
+it for bounded I/O. A visitor error aborts the visit unchanged. It carries no
+generation authority. After a checked append, bookkeeping can reuse the exact
+verified suffix bytes but still freshly checks the path generation.
+
+Matching a trusted token and length to the previous own append cannot replace
+the post-sync prefix hash: a same-length external prefix edit during the next
+append is indistinguishable from our own writes in the final token. The
+[round-5 evidence limit](design/query-while-scanning.md#round-5-append-evidence-limit)
+names that window and what stronger host evidence would be needed. No shortcut
+or write-ownership lock is added.
+
 There is no exclusive filesystem lock. An external prefix edit during the
 write changes the checked hash; a suffix edit fails read-back; replacement of
 the path after open fails the runtime's fresh path check. A change after that
