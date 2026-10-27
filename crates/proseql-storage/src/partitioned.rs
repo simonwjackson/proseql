@@ -53,6 +53,8 @@ fn error(source: &PartitionedSourceConfig, path: &str, message: impl Into<String
 
 /// The bucket key of a UTC timestamp `YYYY-MM-DDTHH:MM:SS(.f+)?Z`, or `None`
 /// when the value does not match the pattern or names an invalid date or time.
+/// A leap second (`23:59:60`, RFC 3339 section 5.7) belongs to the bucket of
+/// its date; second 60 at any other minute is invalid.
 pub fn time_bucket_key(value: &str, bucket: TimeBucket) -> Option<&str> {
     let bytes = value.as_bytes();
     let digits = |range: std::ops::Range<usize>| -> Option<u32> {
@@ -87,11 +89,13 @@ pub fn time_bucket_key(value: &str, bucket: TimeBucket) -> Option<&str> {
         2 => 28,
         _ => return None,
     };
+    let (hour, minute, second) = (digits(11..13)?, digits(14..16)?, digits(17..19)?);
+    let leap_second = hour == 23 && minute == 59 && second == 60;
     let valid = fraction_ok
         && (1..=days).contains(&day)
-        && digits(11..13)? < 24
-        && digits(14..16)? < 60
-        && digits(17..19)? < 60;
+        && hour < 24
+        && minute < 60
+        && (second < 60 || leap_second);
     valid.then(|| match bucket {
         TimeBucket::Year => &value[..4],
         TimeBucket::Month => &value[..7],
@@ -306,6 +310,14 @@ mod tests {
             time_bucket_key("2024-02-29T23:59:59Z", TimeBucket::Day),
             Some("2024-02-29")
         );
+        assert_eq!(
+            time_bucket_key("2016-12-31T23:59:60Z", TimeBucket::Month),
+            Some("2016-12")
+        );
+        assert_eq!(
+            time_bucket_key("2016-12-31T23:59:60.500Z", TimeBucket::Day),
+            Some("2016-12-31")
+        );
         for invalid in [
             "2026-04-01T08:15:00.123+02:00",
             "2026-04-01T08:15:00.123",
@@ -317,6 +329,9 @@ mod tests {
             "2026-04-31T08:15:00Z",
             "2026-04-01T24:00:00Z",
             "2026-04-01T08:60:00Z",
+            "2026-04-01T08:15:60Z",
+            "2026-04-01T23:58:60Z",
+            "2026-04-01T23:59:61Z",
             "2026-04-01T08:15:00.Z",
             "2026-04-01T08:15:00.12aZ",
             "+02026-04-01T08:15:00Z",
