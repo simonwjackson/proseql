@@ -703,3 +703,207 @@ fn record_files_use_the_shared_schema_encoder_for_transformed_fields() {
         13
     );
 }
+
+#[test]
+fn compound_record_extensions_are_rejected_before_writes() {
+    for format in ["card.json", ".card.json", "json.", "..json"] {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("missing");
+        let mut cfg = config(&root);
+        if let DatabaseSourceConfig::RecordFiles(source) = &mut cfg.sources[0] {
+            source.format = format.into();
+        }
+        let error = NativeRuntime::open_sources_with_options(cfg, options())
+            .err()
+            .expect("compound format must fail at open");
+        assert!(
+            error.to_string().contains("compound extensions"),
+            "{format}: {error}"
+        );
+        assert!(!root.exists(), "format rejection must not create the root");
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
+}
+
+#[test]
+fn a_single_leading_dot_and_extension_case_normalize_without_changing_stem_ids() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut cfg = config(dir.path());
+    if let DatabaseSourceConfig::RecordFiles(source) = &mut cfg.sources[0] {
+        source.format = ".JSON".into();
+    }
+    let runtime = NativeRuntime::open_sources_with_options(cfg, options()).unwrap();
+    runtime
+        .mutate(|db| db.create("records", json!({"id":"alice", "text":"first"})))
+        .unwrap();
+    runtime.reload().unwrap();
+    assert!(runtime.find_by_id("records", "alice").unwrap().is_some());
+    runtime
+        .mutate(|db| db.update("records", "alice", json!({"text":"second"})))
+        .unwrap();
+    assert_eq!(
+        snapshot(dir.path())
+            .into_iter()
+            .map(|entry| entry.0)
+            .collect::<Vec<_>>(),
+        vec!["alice.json"]
+    );
+}
+
+fn bounded_watch_child(name: &str, root: &str) {
+    let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", name, "--ignored", "--nocapture"])
+        .env("PROSEQL_MEMORY_WATCH_ROOT", root)
+        .spawn()
+        .unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            assert!(status.success(), "{name} failed for {root}");
+            break;
+        }
+        if std::time::Instant::now() >= deadline {
+            child.kill().unwrap();
+            child.wait().unwrap();
+            panic!("{name} did not terminate for {root} within 5 seconds");
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[test]
+#[ignore = "bounded subprocess-only memory watcher check"]
+fn memory_missing_root_watch_child() {
+    use proseql_storage::{host::StorageHost, memory::MemoryStorageHost};
+    let root = std::env::var("PROSEQL_MEMORY_WATCH_ROOT").unwrap();
+    let host = Arc::new(MemoryStorageHost::default());
+    let (send, receive) = std::sync::mpsc::channel();
+    let runtime = NativeRuntime::open_sources_with_host(
+        config(Path::new(&root)),
+        host.clone(),
+        NativeSourceRuntimeOptions {
+            on_record_files_reload: Some(Arc::new(move |diff| send.send(diff).unwrap())),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert!(runtime.find_by_id("records", "alice").unwrap().is_none());
+    let path = proseql_storage::path::join_path(&root, "alice.json");
+    host.write(&path, r#"{"text":"added"}"#).unwrap();
+    let added = receive.recv_timeout(Duration::from_secs(2)).unwrap();
+    assert_eq!(
+        added,
+        RecordFilesReload {
+            source_id: "records".into(),
+            collection: "records".into(),
+            added: vec!["alice".into()],
+            changed: vec![],
+            removed: vec![]
+        }
+    );
+    assert_eq!(
+        runtime.find_by_id("records", "alice").unwrap().unwrap()["text"],
+        "added"
+    );
+    host.write(&path, r#"{"text":"edited"}"#).unwrap();
+    assert_eq!(
+        receive
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap()
+            .changed,
+        vec!["alice"]
+    );
+    assert_eq!(
+        runtime.find_by_id("records", "alice").unwrap().unwrap()["text"],
+        "edited"
+    );
+    host.remove(&path).unwrap();
+    assert_eq!(
+        receive
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap()
+            .removed,
+        vec!["alice"]
+    );
+    assert!(runtime.find_by_id("records", "alice").unwrap().is_none());
+    runtime.close().unwrap();
+}
+
+#[test]
+fn memory_missing_relative_and_nested_roots_receive_managed_changes() {
+    for root in ["missing", "nested/missing", ".", "/missing"] {
+        bounded_watch_child("memory_missing_root_watch_child", root);
+    }
+}
+
+struct UnavailableAncestors(proseql_storage::memory::MemoryStorageHost);
+impl proseql_storage::host::StorageHost for UnavailableAncestors {
+    fn read(&self, path: &str) -> Result<String, EngineError> {
+        self.0.read(path)
+    }
+    fn write(&self, path: &str, data: &str) -> Result<(), EngineError> {
+        self.0.write(path, data)
+    }
+    fn append(&self, path: &str, data: &str) -> Result<(), EngineError> {
+        self.0.append(path, data)
+    }
+    fn exists(&self, _path: &str) -> Result<bool, EngineError> {
+        Ok(false)
+    }
+    fn remove(&self, path: &str) -> Result<(), EngineError> {
+        self.0.remove(path)
+    }
+    fn ensure_dir(&self, path: &str) -> Result<(), EngineError> {
+        self.0.ensure_dir(path)
+    }
+    fn list_directory(&self, path: &str) -> Result<Vec<String>, EngineError> {
+        self.0.list_directory(path)
+    }
+    fn list_recursive(&self, path: &str) -> Result<Vec<String>, EngineError> {
+        self.0.list_recursive(path)
+    }
+    fn watch(
+        &self,
+        path: &str,
+        callback: Box<dyn Fn(proseql_storage::host::StorageEvent) + Send + Sync>,
+    ) -> Result<Box<dyn proseql_storage::host::WatchHandle>, EngineError> {
+        self.0.watch(path, callback)
+    }
+    fn watch_dir(
+        &self,
+        path: &str,
+        callback: Box<dyn Fn(proseql_storage::host::StorageEvent) + Send + Sync>,
+    ) -> Result<Box<dyn proseql_storage::host::WatchHandle>, EngineError> {
+        self.0.watch_dir(path, callback)
+    }
+}
+impl proseql_storage::persistence::DurableStorageHost for UnavailableAncestors {
+    fn replace_durable(&self, path: &str, data: &str) -> Result<(), EngineError> {
+        proseql_storage::persistence::DurableStorageHost::replace_durable(&self.0, path, data)
+    }
+}
+#[test]
+#[ignore = "bounded subprocess-only unavailable-ancestor check"]
+fn unavailable_watch_ancestor_child() {
+    let host = Arc::new(UnavailableAncestors(
+        proseql_storage::memory::MemoryStorageHost::default(),
+    ));
+    let error = NativeRuntime::open_sources_with_host(
+        config(Path::new("missing")),
+        host,
+        NativeSourceRuntimeOptions::default(),
+    )
+    .err()
+    .expect("unavailable ancestors must fail without looping");
+    assert!(
+        matches!(&error, EngineError::Operation(operation) if operation.reason == "watch-root")
+    );
+    assert!(
+        error.to_string().contains("No existing source ancestor"),
+        "{error}"
+    );
+}
+#[test]
+fn unavailable_watch_ancestors_terminate_with_an_error() {
+    bounded_watch_child("unavailable_watch_ancestor_child", "missing");
+}

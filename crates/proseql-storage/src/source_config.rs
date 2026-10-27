@@ -138,6 +138,8 @@ pub struct RecordFilesSourceConfig {
     pub id: String,
     pub collection: String,
     pub root: String,
+    /// Single codec extension; one leading dot is optional. Compound extensions
+    /// are unsupported. Normalization removes the dot and lowercases ASCII.
     pub format: String,
 }
 
@@ -625,6 +627,17 @@ pub fn normalize_source_config(
                         "Collection '{}' is backed by both '{}' and '{}'",
                         source.collection, existing, source.id
                     )));
+                }
+                source.format = source
+                    .format
+                    .strip_prefix('.')
+                    .unwrap_or(&source.format)
+                    .to_ascii_lowercase();
+                if source.format.contains('.') {
+                    return Err(error(
+                        "RecordFiles compound extensions are unsupported; use a single extension"
+                            .into(),
+                    ));
                 }
                 if source.root.trim().is_empty()
                     || !crate::partitioned::safe_component(&source.format)

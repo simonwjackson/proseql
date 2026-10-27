@@ -5,8 +5,11 @@ use std::sync::{Arc, Mutex};
 use proseql_engine::errors::{EngineError, StorageOperation};
 
 use crate::host::{storage_error, StorageEvent, StorageEventKind, StorageHost, WatchHandle};
-use crate::path::normalize_path;
+use crate::path::{join_path, normalize_path};
 
+/// In-process storage with permanent virtual directory roots: `.` for relative
+/// paths and `/` for absolute paths. Root listings and watches stay in their
+/// namespace; other directories exist only while they contain files.
 #[derive(Clone)]
 pub struct MemoryStorageHost {
     inner: Arc<Inner>,
@@ -73,6 +76,33 @@ impl Default for MemoryStorageHost {
 }
 
 impl MemoryStorageHost {
+    fn is_virtual_root(path: &str) -> bool {
+        matches!(path, "." | "/")
+    }
+
+    fn relative_entry<'a>(root: &str, path: &'a str) -> Option<&'a str> {
+        match root {
+            "." if !path.starts_with('/') && path != "." => Some(path),
+            "/" => path
+                .strip_prefix('/')
+                .filter(|relative| !relative.is_empty()),
+            _ => path
+                .strip_prefix(root)
+                .and_then(|relative| relative.strip_prefix('/')),
+        }
+    }
+
+    fn require_file_path(path: &str, operation: StorageOperation) -> Result<(), EngineError> {
+        if Self::is_virtual_root(path) {
+            return Err(storage_error(
+                path,
+                operation,
+                "Virtual roots are directories, not files",
+            ));
+        }
+        Ok(())
+    }
+
     fn basename(path: &str) -> Option<String> {
         normalize_path(path)
             .rsplit('/')
@@ -105,7 +135,7 @@ impl MemoryStorageHost {
             let matches = match target {
                 WatchTarget::Path(target) => target == normalized,
                 WatchTarget::Dir(target) => {
-                    normalized == target || normalized.starts_with(&format!("{target}/"))
+                    normalized == target || Self::relative_entry(&target, &normalized).is_some()
                 }
             };
             if matches {
@@ -182,6 +212,7 @@ impl StorageHost for MemoryStorageHost {
 
     fn write(&self, path: &str, data: &str) -> Result<(), EngineError> {
         let path = normalize_path(path);
+        Self::require_file_path(&path, StorageOperation::Write)?;
         let kind = {
             let mut files = self.inner.files.lock().map_err(|_| {
                 storage_error(&path, StorageOperation::Write, "Poisoned memory storage")
@@ -200,6 +231,7 @@ impl StorageHost for MemoryStorageHost {
 
     fn append(&self, path: &str, data: &str) -> Result<(), EngineError> {
         let path = normalize_path(path);
+        Self::require_file_path(&path, StorageOperation::Write)?;
         let kind = {
             let mut files = self.inner.files.lock().map_err(|_| {
                 storage_error(&path, StorageOperation::Write, "Poisoned memory storage")
@@ -217,17 +249,23 @@ impl StorageHost for MemoryStorageHost {
     }
 
     fn exists(&self, path: &str) -> Result<bool, EngineError> {
-        let path = normalize_path(path).trim_end_matches('/').to_owned();
-        let prefix = format!("{path}/");
+        let path = normalize_path(path);
+        if Self::is_virtual_root(&path) {
+            return Ok(true);
+        }
         let files =
             self.inner.files.lock().map_err(|_| {
                 storage_error(&path, StorageOperation::Read, "Poisoned memory storage")
             })?;
-        Ok(files.contains_key(&path) || files.keys().any(|key| key.starts_with(&prefix)))
+        Ok(files.contains_key(&path)
+            || files
+                .keys()
+                .any(|key| Self::relative_entry(&path, key).is_some()))
     }
 
     fn remove(&self, path: &str) -> Result<(), EngineError> {
         let path = normalize_path(path);
+        Self::require_file_path(&path, StorageOperation::Delete)?;
         let removed = self
             .inner
             .files
@@ -250,30 +288,33 @@ impl StorageHost for MemoryStorageHost {
     }
 
     fn is_directory(&self, path: &str) -> Result<bool, EngineError> {
-        let prefix = format!("{}/", normalize_path(path).trim_end_matches('/'));
+        let normalized = normalize_path(path);
+        if Self::is_virtual_root(&normalized) {
+            return Ok(true);
+        }
         let files =
             self.inner.files.lock().map_err(|_| {
                 storage_error(path, StorageOperation::List, "Poisoned memory storage")
             })?;
-        Ok(files.keys().any(|key| key.starts_with(&prefix)))
+        Ok(files
+            .keys()
+            .any(|key| Self::relative_entry(&normalized, key).is_some()))
     }
     fn list_directory(&self, dir_path: &str) -> Result<Vec<String>, EngineError> {
-        let dir_path = normalize_path(dir_path).trim_end_matches('/').to_owned();
-        let prefix = format!("{dir_path}/");
+        let dir_path = normalize_path(dir_path);
         let files = self.inner.files.lock().map_err(|_| {
             storage_error(&dir_path, StorageOperation::List, "Poisoned memory storage")
         })?;
         let mut entries = BTreeSet::new();
         for path in files.keys() {
-            if !path.starts_with(&prefix) {
+            let Some(rest) = Self::relative_entry(&dir_path, path) else {
                 continue;
-            }
-            let rest = &path[prefix.len()..];
+            };
             if rest.is_empty() {
                 continue;
             }
             if let Some((first, _)) = rest.split_once('/') {
-                entries.insert(format!("{dir_path}/{first}"));
+                entries.insert(join_path(&dir_path, first));
             } else {
                 entries.insert(path.clone());
             }
@@ -282,8 +323,7 @@ impl StorageHost for MemoryStorageHost {
     }
 
     fn list_recursive(&self, root_path: &str) -> Result<Vec<String>, EngineError> {
-        let root_path = normalize_path(root_path).trim_end_matches('/').to_owned();
-        let prefix = format!("{root_path}/");
+        let root_path = normalize_path(root_path);
         let files = self.inner.files.lock().map_err(|_| {
             storage_error(
                 &root_path,
@@ -293,7 +333,7 @@ impl StorageHost for MemoryStorageHost {
         })?;
         let mut entries = files
             .keys()
-            .filter(|path| *path == &root_path || path.starts_with(&prefix))
+            .filter(|path| *path == &root_path || Self::relative_entry(&root_path, path).is_some())
             .cloned()
             .collect::<Vec<_>>();
         entries.sort();
@@ -313,9 +353,6 @@ impl StorageHost for MemoryStorageHost {
         path: &str,
         on_change: Box<dyn Fn(StorageEvent) + Send + Sync>,
     ) -> Result<Box<dyn WatchHandle>, EngineError> {
-        self.insert_watch(
-            WatchTarget::Dir(normalize_path(path).trim_end_matches('/').to_owned()),
-            on_change,
-        )
+        self.insert_watch(WatchTarget::Dir(normalize_path(path)), on_change)
     }
 }

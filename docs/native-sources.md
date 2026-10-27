@@ -19,7 +19,10 @@ The consumer example at `crates/proseql-native/examples/support/coach.rs` maps t
 `DatabaseSourceConfig::RecordFiles(RecordFilesSourceConfig { id, collection, root, format })`
 stores one collection in flat `<root>/<id>.<format>` files. The normalized enum
 uses the same config type with a normalized root. `format` is a registered codec
-extension, such as `json`, not an inferred collection format. Every file must
+extension, such as `json`, not an inferred collection format. Normalization removes
+one optional leading dot and lowercases ASCII (`.JSON` becomes `json`). Compound
+extensions such as `card.json` are unsupported: any remaining dot fails config
+validation before writes. Every file must
 decode to one object. Arrays, scalars, empty decodes, malformed bytes, and unsafe
 matching stems fail with the file path. Nothing is silently skipped except dot
 entries, directories, and files with another extension. A missing root is empty;
@@ -63,6 +66,14 @@ ancestor; `ParentDirectorySync` exposes that boundary before file replacement.
 `MemoryStorageHost` provides the corresponding in-process behavior. Hosts whose
 `list_directory` output includes directories must implement `StorageHost::is_directory`
 so RecordFiles can ignore them; the default assumes a flat files-only host.
+
+`MemoryStorageHost` has permanent virtual directory roots: `.` for relative paths
+and `/` for absolute paths. Listings and directory watches stay within that
+namespace. The roots exist even on an empty host and cannot be written, appended,
+or removed as files. Other directories exist while they contain files. Default
+managed watching therefore supports initially missing relative and nested relative
+RecordFiles roots. For custom hosts with no available ancestor, watch setup returns
+an `OperationError` with reason `watch-root`; ancestry cannot loop at `.`.
 
 Each collection has one source owner. RecordFiles rejects another flat owner of
 the same root/extension, matching collection-file paths, and overlapping document

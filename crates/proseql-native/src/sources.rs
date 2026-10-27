@@ -1176,8 +1176,9 @@ impl SourceState {
             }
         }
         for root in &mut roots {
+            *root = proseql_storage::path::normalize_path(root);
             while !host.exists(root)? {
-                *root = std::path::Path::new(root)
+                let parent = std::path::Path::new(root)
                     .parent()
                     .map(|path| {
                         if path.as_os_str().is_empty() {
@@ -1191,6 +1192,13 @@ impl SourceState {
                     })?
                     .to_string_lossy()
                     .into_owned();
+                if parent == *root {
+                    return Err(crate::operation_error(
+                        "watch-root",
+                        "No existing source ancestor to watch: ancestry made no progress",
+                    ));
+                }
+                *root = parent;
             }
         }
         roots.sort();
