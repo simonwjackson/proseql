@@ -94,10 +94,7 @@ pub(crate) struct IndexState {
 }
 
 impl IndexState {
-    /// Drop every derived index (time indexes, ID locator, validated
-    /// generations) after the sources changed, but keep the codec context
-    /// configured at runtime assembly. Use this instead of replacing the
-    /// state with `Default::default()`, which would lose that context.
+    /// Publish eligible derived state; failures never change a source result.
     pub(crate) fn save(&self, host: &dyn StorageHost) {
         if let Some(store) = &self.store {
             if let Some(ids) = &self.ids {
@@ -114,6 +111,7 @@ impl IndexState {
         }
     }
 
+    /// Drop derived indexes, but keep the configured codec and sidecar context.
     pub fn invalidate(&mut self) {
         if let Some(store) = &self.store {
             store.clear();

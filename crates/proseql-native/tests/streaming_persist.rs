@@ -35,6 +35,7 @@ fn answers_and_partition_sets_survive_disposable_cache_damage() {
         "truncated",
         "bitflip",
         "version",
+        "index-version",
         "temp",
     ] {
         let fixture = ParityFixture::new(60);
@@ -54,11 +55,11 @@ fn answers_and_partition_sets_survive_disposable_cache_damage() {
                 }
                 "truncated" => bytes.truncate(17),
                 "bitflip" => {
-                    let last = bytes.len() - 1;
+                    let last = bytes.len() / 2;
                     bytes[last] ^= 1;
                 }
-                "version" => {
-                    bytes[8] = 0;
+                "version" | "index-version" => {
+                    bytes[if damage == "version" { 8 } else { 16 }] = 0;
                     let end = bytes.len() - 8;
                     let hash = proseql_storage::index::persist::checksum(&bytes[..end]);
                     bytes[end..].copy_from_slice(&hash.to_le_bytes());
@@ -87,6 +88,7 @@ fn answers_and_partition_sets_survive_disposable_cache_damage() {
         );
         let status = runtime.lazy_partition_status(SOURCE).unwrap().unwrap();
         assert!(status.loaded.is_empty());
+        assert_eq!(status.partitions.len(), 3);
         // Deletion between operations never removes authoritative records.
         if dir.exists() {
             fs::remove_dir_all(&dir).unwrap();

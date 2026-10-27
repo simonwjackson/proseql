@@ -56,7 +56,7 @@ try:
                 for mode in modes:
                     for cache in ("cold", "warm"):
                         root = data / "trial"
-                        shutil.copytree(base, root)
+                        subprocess.run(["cp", "-a", "--reflink=auto", str(base), str(root)], check=True)
                         try:
                             backend = "sqlite" if mode == "sqlite" else "streaming"
                             sidecars = root / kind / ".proseql-index"
@@ -66,7 +66,7 @@ try:
                                 # for THIS directory before launching the fresh process.
                                 run([probe, root, kind, "close"])
                             relevant = m.files(root, backend, kind)
-                            m.evict(relevant)
+                            m.evict(sorted(p for p in root.rglob("*") if p.is_file()))
                             if cache == "warm":
                                 m.warm(relevant)
                             before = m.residency(relevant)

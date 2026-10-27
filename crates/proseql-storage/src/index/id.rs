@@ -169,9 +169,21 @@ impl IdLocator {
                 Some(generation) => generation.clone(),
                 None => SourceGeneration::observe(host, path)?,
             };
-            let loaded = generation
-                .as_ref()
-                .and_then(|current| store.and_then(|store| store.load(host, current, "ids")));
+            let loaded = generation.as_ref().and_then(|current| {
+                store.and_then(|store| {
+                    // A validating build must visit membership-only files
+                    // before finish() reports any duplicate. Otherwise an ID
+                    // cache could reorder payload validation behind duplicates.
+                    if visit.is_some()
+                        && !store
+                            .load(host, current, "valid")
+                            .is_some_and(|valid| valid.payload.is_empty())
+                    {
+                        return None;
+                    }
+                    store.load(host, current, "ids")
+                })
+            });
             let mut position = (0, 0);
             if let Some(loaded) = loaded {
                 if let Some((rows, resume, entries)) =

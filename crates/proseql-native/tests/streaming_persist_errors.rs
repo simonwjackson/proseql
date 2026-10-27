@@ -120,3 +120,39 @@ fn checked_own_append_is_saved_on_release_and_reopened() {
     reopened.close().unwrap();
     runtime.close().unwrap();
 }
+
+#[test]
+fn membership_only_sidecars_never_reorder_validation_before_duplicate_errors() {
+    let fixture = ParityFixture::new(60);
+    let path = fixture.partition_path("2025-01");
+    let text = fs::read_to_string(&path).unwrap();
+    let mut lines = text.lines().map(str::to_owned).collect::<Vec<_>>();
+    let mut invalid: serde_json::Value = serde_json::from_str(&lines[0]).unwrap();
+    invalid["value"] = json!("bad");
+    lines[0] = invalid.to_string();
+    fs::write(&path, format!("{}\n", lines.join("\n"))).unwrap();
+    // Append builds membership, deliberately without validating old payloads.
+    let runtime = fixture.open(RuntimeKind::Lazy);
+    let mut new = support::parity::sample("2025-03", 28, 59, "steps");
+    new["id"] = json!("own");
+    runtime.mutate(|m| m.create(COLLECTION, new)).unwrap();
+    runtime.close().unwrap();
+    let mut duplicate = support::parity::sample("2025-02", 28, 59, "steps");
+    duplicate["id"] = invalid["id"].clone();
+    writeln!(
+        fs::OpenOptions::new()
+            .append(true)
+            .open(fixture.partition_path("2025-02"))
+            .unwrap(),
+        "{duplicate}"
+    )
+    .unwrap();
+    let runtime = fixture.open(RuntimeKind::Lazy);
+    let with = runtime.find_by_id(COLLECTION, "absent").unwrap_err();
+    runtime.close().unwrap();
+    fs::remove_dir_all(path.parent().unwrap().join(".proseql-index")).unwrap();
+    let runtime = fixture.open(RuntimeKind::Lazy);
+    let without = runtime.find_by_id(COLLECTION, "absent").unwrap_err();
+    assert_eq!(with, without);
+    runtime.close().unwrap();
+}
