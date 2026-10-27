@@ -111,6 +111,39 @@ impl IndexState {
         }
     }
 
+    /// True only for canonical validation of this exact observed generation.
+    /// The caller still checks its fresh observation after scanning.
+    pub(crate) fn checked_validation(
+        &mut self,
+        host: &dyn StorageHost,
+        path: &str,
+        observed: &SourceGeneration,
+    ) -> Result<bool, EngineError> {
+        if observed.path != path {
+            return Ok(false);
+        }
+        if self.validated.get(path) == Some(observed) {
+            return Ok(true);
+        }
+        if let Some(loaded) = self
+            .store
+            .as_ref()
+            .and_then(|store| store.load(host, observed, "valid"))
+        {
+            if loaded.unchanged && loaded.payload.is_empty() {
+                self.record_validation(path, observed.clone());
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    /// Call only after full canonical validation, including duplicate checks.
+    pub(crate) fn record_validation(&mut self, path: &str, generation: SourceGeneration) {
+        debug_assert_eq!(path, generation.path);
+        self.validated.insert(path.into(), generation);
+    }
+
     /// Drop derived indexes, but keep the configured codec and sidecar context.
     pub fn invalidate(&mut self) {
         if let Some(store) = &self.store {
@@ -222,15 +255,24 @@ impl IndexState {
         if self.codec.as_ref().is_some_and(|codec| !codec.positional) {
             return self.id_locator_visiting(host, paths, &mut |_, _, _, _| Ok(()));
         }
-        // Appends need identities, not payload validation. Do not dispatch an
-        // empty visitor and decoded-result adapter for every historical row.
+        self.id_membership_observed(host, paths, &PathObservations::new())
+    }
+
+    fn id_membership_observed(
+        &mut self,
+        host: &dyn StorageHost,
+        paths: &[String],
+        observed: &PathObservations,
+    ) -> Result<&mut IdLocator, EngineError> {
+        // Appends need identities, not payload validation. An exact validation
+        // proof loaded by lookup also needs no second validation-sidecar read.
         let refreshed = if let Some(locator) = self.ids.as_mut() {
-            locator.refresh(host, paths)
+            locator.refresh_observed_decoded(host, paths, observed, &mut |_, _, _, _| Ok(None))
         } else {
             (if let Some(store) = &self.store {
-                IdLocator::build_persisted(host, paths, &PathObservations::new(), None, store)
+                IdLocator::build_persisted(host, paths, observed, None, store)
             } else {
-                IdLocator::build(host, paths)
+                IdLocator::build_observed_decoded(host, paths, observed, &mut |_, _, _, _| Ok(None))
             })
             .map(|locator| self.ids = Some(locator))
         };
@@ -296,6 +338,23 @@ impl IndexState {
         }
         self.retain_append_proofs();
         Ok(self.ids.as_mut().expect("built locator"))
+    }
+
+    fn matches_validated_listing(
+        &self,
+        listed: &[(String, proseql_storage::host::FileStat)],
+    ) -> bool {
+        self.ids
+            .as_ref()
+            .is_some_and(|ids| ids.matches_listed_stats(listed))
+            && listed.iter().all(|(path, stat)| {
+                self.validated.get(path).is_some_and(|generation| {
+                    stat.change_id.is_some()
+                        && generation.change_id == stat.change_id
+                        && generation.covered_len == stat.len
+                        && generation.modified_ns == stat.modified_ns
+                })
+            })
     }
 
     fn retain_append_proofs(&mut self) {
@@ -408,9 +467,41 @@ impl IndexState {
                 source: &codec.source,
                 callbacks: &codec.callbacks,
             };
-            decoder
-                .decode_row(host, &codec.formats, &file, &bytes)?
-                .filter(|row| row.get("id").and_then(Value::as_str) == Some(id))
+            // Reuse the same audited borrowed validation as locator builds.
+            // A store exists only for callback/default/migration-free schemas;
+            // other schemas and all errors retain canonical replay below.
+            let simple = (self.store.is_some()
+                && codec.collection.version.is_none()
+                && matches!(
+                    codec.collection.id_strategy,
+                    proseql_engine::descriptor::IdStrategy::Provided
+                ))
+            .then(|| proseql_engine::scan::decoder::SimpleDecoder::new(&codec.collection.schema))
+            .flatten();
+            let expected =
+                proseql_storage::partition_prune::partition_key_of_path(&codec.source, path);
+            let decoded = simple
+                .as_ref()
+                .and_then(|decoder| decoder.decode(&bytes).ok().flatten())
+                .filter(|row| {
+                    !id.is_empty()
+                        && row
+                            .get("id")
+                            .and_then(proseql_engine::scan::borrowed::BorrowedValue::as_str)
+                            == Some(id)
+                        && crate::streaming::borrowed_partition_matches(
+                            &codec.source,
+                            expected.as_deref(),
+                            row,
+                        )
+                })
+                .map(|row| row.to_owned());
+            match decoded {
+                Some(row) => Some(row),
+                None => decoder
+                    .decode_row(host, &codec.formats, &file, &bytes)?
+                    .filter(|row| row.get("id").and_then(Value::as_str) == Some(id)),
+            }
         };
         if let Some(generation) = generation {
             if generation.check(host)? != GenerationCheck::Unchanged {
@@ -489,10 +580,46 @@ fn lookup(
     // Keep the historical policy, even though membership can now avoid a scan.
     sources.lazy_full_scope(collection, "findById")?;
     let source = sources.lazy[collection].source.clone();
+    let entries = if host.exists(&source.root)? {
+        let mut entries = host.list_directory_with_stat(&source.root)?;
+        entries.retain(|(path, _)| {
+            proseql_storage::partitioned::matches_partition_path(&source, path)
+        });
+        entries.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+        entries
+    } else {
+        Vec::new()
+    };
+    let lazy = sources.lazy.get_mut(collection).expect("lazy collection");
+    if lazy
+        .stream
+        .index
+        .codec
+        .as_ref()
+        .is_some_and(|codec| codec.positional)
+        && lazy.known.keys().eq(entries.iter().map(|(path, _)| path))
+        && lazy.stream.index.matches_validated_listing(&entries)
+    {
+        // Every file was freshly observed, including files other than the hit.
+        // Reuse those observations without rebuilding owned generation maps.
+        let index = &mut lazy.stream.index;
+        let candidates = index
+            .ids
+            .as_ref()
+            .expect("checked locator")
+            .locate(id)
+            .map_err(|error| contextualize(error, &source))?;
+        for (path, location) in candidates {
+            if let Some(row) = index.verify_candidate(host, &path, location, id)? {
+                return Ok(Some(row));
+            }
+        }
+        return Ok(None);
+    }
     let mut listed = BTreeMap::new();
     let mut listed_stats = BTreeMap::new();
-    if host.exists(&source.root)? {
-        for (path, stat) in host.list_directory_with_stat(&source.root)? {
+    {
+        for (path, stat) in entries {
             if !proseql_storage::partitioned::matches_partition_path(&source, &path) {
                 continue;
             }
@@ -546,7 +673,9 @@ fn lookup(
     for path in &paths {
         let generation = SourceGeneration::observe_stat(host, path, listed_stats[path])?;
         let index = &mut sources.lazy.get_mut(collection).expect("lazy").stream.index;
-        if !index.validated.contains_key(path) {
+        if !index.checked_validation(host, path, &generation)?
+            && !index.validated.contains_key(path)
+        {
             if let Some(loaded) = index
                 .store
                 .as_ref()
@@ -584,7 +713,7 @@ fn lookup(
             .stream
             .index;
         let candidates = index
-            .id_locator_observed(host, &paths, &observed, &mut |_, _, _, _| Ok(()))
+            .id_membership_observed(host, &paths, &observed)
             .and_then(|locator| locator.locate(id))
             .map_err(|error| contextualize(error, &source))?;
         for (path, location) in candidates {
@@ -868,6 +997,90 @@ mod tests {
     use proseql_formats::{FormatCodec, FormatOptions};
     use proseql_storage::memory::MemoryStorageHost;
     use proseql_storage::source_config::PartitionKey;
+
+    #[test]
+    fn validation_proofs_require_exact_generation_schema_and_sound_sidecars() {
+        use proseql_storage::fs::FsStorageHost;
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_str().unwrap();
+        let path = format!("{root}/one.jsonl");
+        let host = FsStorageHost::new_polling(std::time::Duration::from_secs(60)).unwrap();
+        host.write(&path, "{\"id\":\"a\"}\n").unwrap();
+        let generation = SourceGeneration::observe(&host, &path).unwrap().unwrap();
+        let store = Store::new(root.into(), 7);
+        store.save(&host, &generation, "valid", &[]);
+        let mut index = IndexState {
+            store: Some(store.clone()),
+            ..IndexState::default()
+        };
+        assert!(index.checked_validation(&host, &path, &generation).unwrap());
+        assert!(index.checked_validation(&host, &path, &generation).unwrap());
+        host.append(&path, "{\"id\":\"b\"}\n").unwrap();
+        let grown = SourceGeneration::observe(&host, &path).unwrap().unwrap();
+        assert!(!index.checked_validation(&host, &path, &grown).unwrap());
+        host.write(&path, "{\"id\":\"c\"}\n").unwrap();
+        let edited = SourceGeneration::observe(&host, &path).unwrap().unwrap();
+        assert!(!index.checked_validation(&host, &path, &edited).unwrap());
+        host.write(&path, "{\"id\":\"a\"}\n").unwrap();
+        let generation = SourceGeneration::observe(&host, &path).unwrap().unwrap();
+        store.save(&host, &generation, "valid", &[]);
+        let mut other_schema = IndexState {
+            store: Some(Store::new(root.into(), 8)),
+            ..IndexState::default()
+        };
+        assert!(!other_schema
+            .checked_validation(&host, &path, &generation)
+            .unwrap());
+        let cache = store.path(&path, "valid").unwrap();
+        let original = std::fs::read(&cache).unwrap();
+        for old in [false, true] {
+            let mut bytes = original.clone();
+            if old {
+                bytes[16..24].copy_from_slice(&0u64.to_le_bytes());
+                let end = bytes.len() - 8;
+                let hash = proseql_storage::index::persist::checksum(&bytes[..end]);
+                bytes[end..].copy_from_slice(&hash.to_le_bytes());
+            } else {
+                bytes.truncate(19);
+            }
+            std::fs::write(&cache, bytes).unwrap();
+            index.validated.clear();
+            assert!(!index.checked_validation(&host, &path, &generation).unwrap());
+        }
+    }
+
+    #[test]
+    fn validated_listing_shortcut_requires_each_exact_validation_generation() {
+        use proseql_storage::fs::FsStorageHost;
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_str().unwrap();
+        let host = FsStorageHost::new_polling(std::time::Duration::from_secs(60)).unwrap();
+        let paths = (0..3)
+            .map(|file| format!("{root}/{file}.jsonl"))
+            .collect::<Vec<_>>();
+        for (file, path) in paths.iter().enumerate() {
+            host.write(path, &format!("{{\"id\":\"{file}\"}}\n"))
+                .unwrap();
+        }
+        let mut index = IndexState {
+            ids: Some(IdLocator::build(&host, &paths).unwrap()),
+            ..IndexState::default()
+        };
+        let listed = paths
+            .iter()
+            .map(|path| (path.clone(), host.stat(path).unwrap().unwrap()))
+            .collect::<Vec<_>>();
+        assert!(!index.matches_validated_listing(&listed));
+        for path in &paths {
+            index.record_validation(
+                path,
+                SourceGeneration::observe(&host, path).unwrap().unwrap(),
+            );
+        }
+        assert!(index.matches_validated_listing(&listed));
+        index.validated.get_mut(&paths[1]).unwrap().covered_len += 1;
+        assert!(!index.matches_validated_listing(&listed));
+    }
 
     #[test]
     fn own_append_proofs_chain_and_external_edits_clear_them() {

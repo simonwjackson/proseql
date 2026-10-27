@@ -125,7 +125,7 @@ impl Store {
         current: &SourceGeneration,
         kind: &str,
     ) -> Option<Loaded> {
-        let bytes = host.read_index(&self.path(&current.path, kind)?)?;
+        let mut bytes = host.read_index(&self.path(&current.path, kind)?)?;
         let (body, tail) = bytes.split_at_checked(bytes.len().checked_sub(8)?)?;
         if checksum(body) != u64::from_le_bytes(tail.try_into().ok()?) {
             return None;
@@ -157,10 +157,11 @@ impl Store {
             return None;
         }
         let hash = take(&mut input)?;
-        let payload = blob(&mut input)?.to_vec();
+        let payload = blob(&mut input)?;
         if !input.is_empty() {
             return None;
         }
+        let payload_range = body.len() - payload.len()..body.len();
         let generation = SourceGeneration {
             path: current.path.clone(),
             covered_len: len,
@@ -197,9 +198,12 @@ impl Store {
                 hash,
             },
         );
+        let payload_len = payload_range.len();
+        bytes.copy_within(payload_range, 0);
+        bytes.truncate(payload_len);
         Some(Loaded {
             generation,
-            payload,
+            payload: bytes,
             unchanged,
         })
     }

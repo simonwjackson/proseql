@@ -20,8 +20,6 @@ fn speculative_address(file: u32, offset: u64) -> Option<u64> {
         .then_some(WIDE_MARKER | SPECULATIVE_TAG | (u64::from(file) << 32) | offset)
 }
 
-type SavedEntries = (u64, u64, Vec<(u64, u64, u64)>);
-
 type RowVisitor<'a> = dyn FnMut(&str, &[u8], RowLocation, bool) -> Result<(), EngineError> + 'a;
 type DecodedRowVisitor<'a> =
     dyn FnMut(&str, &[u8], RowLocation, bool) -> Result<Option<Box<str>>, EngineError> + 'a;
@@ -100,6 +98,8 @@ struct File {
 #[derive(Debug, Clone, Default)]
 pub struct IdLocator {
     entries: Vec<Entry>,
+    // Saved file-local sorted runs. Empty means entries is globally sorted.
+    runs: Vec<Vec<Entry>>,
     delta: Vec<Entry>,
     files: Vec<File>,
     wide: HashMap<u64, Location>,
@@ -155,7 +155,9 @@ impl IdLocator {
     ) -> Result<Self, EngineError> {
         let _build = crate::diagnostics::span("streaming_id_locator_build");
         let mut locator = Self::default();
+        let mut restored = Vec::new();
         for path in paths {
+            let begin = locator.entries.len();
             let file = u32::try_from(locator.files.len())
                 .map_err(|_| id_error(path, "Too many partition files"))?;
             locator.files.push(File {
@@ -189,21 +191,9 @@ impl IdLocator {
             let mut position = (0, 0);
             if let Some(loaded) = loaded {
                 if let Some((rows, resume, entries)) =
-                    Self::decode_entries(&loaded.payload, loaded.generation.covered_len)
+                    locator.decode_entries(&loaded.payload, loaded.generation.covered_len, file)
                 {
-                    for (hash, offset, ordinal) in entries {
-                        let mut entry = locator.make_entry(
-                            file,
-                            "",
-                            RowLocation {
-                                partition: file,
-                                offset,
-                                ordinal,
-                            },
-                        );
-                        entry.hash = hash;
-                        locator.entries.push(entry);
-                    }
+                    locator.entries = entries;
                     locator.files[file as usize] = File {
                         path: path.clone(),
                         generation: generation.clone(),
@@ -212,18 +202,32 @@ impl IdLocator {
                         dirty: false,
                     };
                     if loaded.unchanged {
+                        restored.push(loaded.generation);
+                        locator.runs.push(std::mem::take(&mut locator.entries));
                         continue;
                     }
                     if resume == loaded.generation.covered_len {
                         position = (resume, rows);
                     } else {
-                        locator.remove_suffix(file, 0);
+                        locator.entries.truncate(begin);
+                        locator.wide.retain(|_, location| location.file != file);
                     }
                 }
             }
             locator.scan_file(host, file, position, generation, false, visit)?;
+            locator.entries[begin..]
+                .sort_unstable_by(|left, right| entry_order(left, right, &locator.wide));
+            locator.entries.shrink_to_fit();
+            locator.runs.push(std::mem::take(&mut locator.entries));
         }
         locator.finish(host)?;
+        // Scans perform their own post-check. Restored sources also receive a
+        // fresh check after loading and collection-wide duplicate proof.
+        for generation in restored {
+            if generation.check(host)? != GenerationCheck::Unchanged {
+                return Err(crate::generation::changed(&generation.path));
+            }
+        }
         Ok(locator)
     }
     /// Restore per-file membership only after checking the source generation.
@@ -237,7 +241,29 @@ impl IdLocator {
         Self::build_internal(host, paths, observed, &mut visit, Some(store))
     }
 
-    fn decode_entries(mut bytes: &[u8], len: u64) -> Option<SavedEntries> {
+    fn decode_entries(
+        &mut self,
+        bytes: &[u8],
+        len: u64,
+        file: u32,
+    ) -> Option<(u64, u64, Vec<Entry>)> {
+        // The build has not installed this file's membership yet. Rejected
+        // payloads must not retain overflow addresses from partial decoding.
+        let next_wide = self.next_wide;
+        let decoded = self.decode_entries_inner(bytes, len, file);
+        if decoded.is_none() {
+            self.wide.retain(|_, location| location.file != file);
+            self.next_wide = next_wide;
+        }
+        decoded
+    }
+
+    fn decode_entries_inner(
+        &mut self,
+        mut bytes: &[u8],
+        len: u64,
+        file: u32,
+    ) -> Option<(u64, u64, Vec<Entry>)> {
         use super::persist::take;
         let rows = take(&mut bytes)?;
         let resume = take(&mut bytes)?;
@@ -264,7 +290,24 @@ impl IdLocator {
                 return None;
             }
             *slot = offset;
-            entries.push((hash, offset, ordinal));
+            let entry = Entry {
+                hash,
+                address: self.address(
+                    file,
+                    RowLocation {
+                        partition: file,
+                        offset,
+                        ordinal,
+                    },
+                ),
+            };
+            if entries
+                .last()
+                .is_some_and(|previous: &Entry| entry_order(previous, &entry, &self.wide).is_gt())
+            {
+                return None;
+            }
+            entries.push(entry);
         }
         if offsets.windows(2).any(|pair| pair[0] >= pair[1]) {
             return None;
@@ -277,32 +320,33 @@ impl IdLocator {
         if self.partitioned || !host.supports_indexes() {
             return;
         }
-        let mut payloads = self
-            .files
-            .iter()
-            .map(|file| {
-                let mut out = Vec::new();
-                put(&mut out, file.rows);
-                put(&mut out, file.resume);
-                put(&mut out, file.rows);
-                out
-            })
-            .collect::<Vec<_>>();
-        for entry in self.entries.iter().chain(&self.delta) {
+        let mut tables = vec![Vec::new(); self.files.len()];
+        for entry in self.tables().flatten().chain(&self.delta) {
             let pos = location(entry, &self.wide);
             if pos.row == super::UNKNOWN_ORDINAL {
                 return;
             }
-            let out = &mut payloads[pos.file as usize];
-            put(out, entry.hash);
-            put(out, pos.offset);
-            put(out, pos.row);
+            tables[pos.file as usize].push(entry);
         }
-        for (file, payload) in self.files.iter().zip(payloads) {
-            if !file.dirty {
-                if let Some(generation) = &file.generation {
-                    store.save(host, generation, "ids", &payload);
+        for (file, mut table) in self.files.iter().zip(tables) {
+            if file.dirty {
+                continue;
+            }
+            if let Some(generation) = &file.generation {
+                if !self.delta.is_empty() {
+                    table.sort_unstable_by(|left, right| entry_order(left, right, &self.wide));
                 }
+                let mut payload = Vec::with_capacity(24 + table.len() * 24);
+                put(&mut payload, file.rows);
+                put(&mut payload, file.resume);
+                put(&mut payload, file.rows);
+                for entry in table {
+                    let pos = location(entry, &self.wide);
+                    put(&mut payload, entry.hash);
+                    put(&mut payload, pos.offset);
+                    put(&mut payload, pos.row);
+                }
+                store.save(host, generation, "ids", &payload);
             }
         }
     }
@@ -318,7 +362,13 @@ impl IdLocator {
         self.entries.push(entry);
     }
     fn make_entry(&mut self, file: u32, id: &str, row: RowLocation) -> Entry {
-        let address = if u64::from(file) < WIDE_FILE
+        Entry {
+            hash: hash(id),
+            address: self.address(file, row),
+        }
+    }
+    fn address(&mut self, file: u32, row: RowLocation) -> u64 {
+        if u64::from(file) < WIDE_FILE
             && row.ordinal <= MAX_SMALL_ROW
             && row.offset <= u64::from(u32::MAX)
         {
@@ -353,16 +403,36 @@ impl IdLocator {
                 },
             );
             address
-        };
-        Entry {
-            hash: hash(id),
-            address,
         }
+    }
+    fn consolidate_runs(&mut self) {
+        if !self.runs.is_empty() {
+            self.entries.reserve(self.runs.iter().map(Vec::len).sum());
+            for run in self.runs.drain(..) {
+                self.entries.extend(run);
+            }
+            self.entries
+                .sort_unstable_by(|left, right| entry_order(left, right, &self.wide));
+        }
+    }
+    fn tables(&self) -> impl Iterator<Item = &[Entry]> {
+        std::iter::once(self.entries.as_slice()).chain(self.runs.iter().map(Vec::as_slice))
+    }
+    fn matching_entries(&self, key: u64) -> impl Iterator<Item = &Entry> {
+        self.tables()
+            .flat_map(move |entries| {
+                let begin = entries.partition_point(|entry| entry.hash < key);
+                entries[begin..]
+                    .iter()
+                    .take_while(move |entry| entry.hash == key)
+            })
+            .chain(self.delta.iter().filter(move |entry| entry.hash == key))
     }
     fn merge_delta(&mut self) {
         if self.delta.is_empty() {
             return;
         }
+        self.consolidate_runs();
         self.delta
             .sort_unstable_by(|left, right| entry_order(left, right, &self.wide));
         let base = std::mem::take(&mut self.entries);
@@ -385,6 +455,7 @@ impl IdLocator {
         self.entries = merged;
     }
     fn remove_suffix(&mut self, file: u32, start: u64) {
+        self.consolidate_runs();
         let keep = |entry: &Entry| {
             let pos = location(entry, &self.wide);
             pos.file != file || pos.offset < start
@@ -462,33 +533,73 @@ impl IdLocator {
     }
     fn finish(&mut self, host: &dyn StorageHost) -> Result<(), EngineError> {
         let _sort = crate::diagnostics::span("streaming_id_locator_finish");
-        self.entries
-            .sort_unstable_by(|left, right| entry_order(left, right, &self.wide));
-        for (position, entry) in self.entries.iter().enumerate().skip(1) {
-            if self.entries[position - 1].hash != entry.hash {
-                continue;
+        let mut repeated = Vec::new();
+        if self.runs.is_empty() {
+            self.entries
+                .sort_unstable_by(|left, right| entry_order(left, right, &self.wide));
+            for pair in self.entries.windows(2) {
+                if pair[0].hash == pair[1].hash {
+                    repeated.push(pair[1].hash);
+                }
             }
-            let current = location(entry, &self.wide);
-            let path = &self.files[current.file as usize].path;
-            let bytes = rows::read_line(host, path, current.offset)?;
-            let id = identity(&bytes).map_err(rows::parse_error)?;
-            let begin = self
-                .entries
-                .partition_point(|candidate| candidate.hash < entry.hash);
-            for previous in &self.entries[begin..position] {
-                let previous = location(previous, &self.wide);
-                let bytes = rows::read_line(
-                    host,
-                    &self.files[previous.file as usize].path,
-                    previous.offset,
-                )?;
-                if identity(&bytes).map_err(rows::parse_error)? == id {
-                    let message = if previous.file == current.file {
-                        "Partition records need unique string IDs".into()
-                    } else {
-                        format!("Duplicate partition record '{id}'")
-                    };
-                    return Err(id_error(path, message));
+        } else {
+            // Hashes are already uniform. Retain all 64 bits and resolve table
+            // collisions by linear probing; an occupied slot is never equality
+            // evidence. At 656,640 rows this transient set is exactly 8 MiB.
+            let count = self.tables().map(<[Entry]>::len).sum::<usize>();
+            let capacity = count
+                .saturating_add(count / 2)
+                .max(2)
+                .checked_next_power_of_two()
+                .ok_or_else(|| id_error("", "Too many partition records"))?;
+            let mut seen = vec![0u64; capacity];
+            let mut zero_seen = false;
+            for entry in self.tables().flatten() {
+                if entry.hash == 0 {
+                    if zero_seen {
+                        repeated.push(0);
+                    }
+                    zero_seen = true;
+                    continue;
+                }
+                let mut slot = entry.hash as usize & (capacity - 1);
+                while seen[slot] != 0 && seen[slot] != entry.hash {
+                    slot = (slot + 1) & (capacity - 1);
+                }
+                if seen[slot] == entry.hash {
+                    repeated.push(entry.hash);
+                } else {
+                    seen[slot] = entry.hash;
+                }
+            }
+        }
+        // Preserve the text rebuild's hash/file/offset error precedence. Only
+        // equal-hash groups need ordering and authoritative identity reads.
+        repeated.sort_unstable();
+        repeated.dedup();
+        for key in repeated {
+            let mut group = self.matching_entries(key).collect::<Vec<_>>();
+            group.sort_unstable_by(|left, right| entry_order(left, right, &self.wide));
+            for (position, entry) in group.iter().enumerate().skip(1) {
+                let current = location(entry, &self.wide);
+                let path = &self.files[current.file as usize].path;
+                let bytes = rows::read_line(host, path, current.offset)?;
+                let id = identity(&bytes).map_err(rows::parse_error)?;
+                for previous in &group[..position] {
+                    let previous = location(previous, &self.wide);
+                    let bytes = rows::read_line(
+                        host,
+                        &self.files[previous.file as usize].path,
+                        previous.offset,
+                    )?;
+                    if identity(&bytes).map_err(rows::parse_error)? == id {
+                        let message = if previous.file == current.file {
+                            "Partition records need unique string IDs".into()
+                        } else {
+                            format!("Duplicate partition record '{id}'")
+                        };
+                        return Err(id_error(path, message));
+                    }
                 }
             }
         }
@@ -602,6 +713,7 @@ impl IdLocator {
             changed = true;
         }
         if changed {
+            self.consolidate_runs();
             self.merge_delta();
             if let Err(error) = self.finish(host) {
                 for file in &mut self.files {
@@ -619,11 +731,7 @@ impl IdLocator {
             return Err(crate::generation::changed(&file.path));
         }
         let key = hash(id);
-        let begin = self.entries.partition_point(|entry| entry.hash < key);
-        self.entries[begin..]
-            .iter()
-            .take_while(|entry| entry.hash == key)
-            .chain(self.delta.iter().filter(|entry| entry.hash == key))
+        self.matching_entries(key)
             .map(|entry| {
                 let pos = location(entry, &self.wide);
                 let path = &self.files[pos.file as usize].path;
@@ -691,17 +799,13 @@ impl IdLocator {
                 continue;
             }
             let key = hash(id);
-            let begin = self.entries.partition_point(|entry| entry.hash < key);
             // Every speculative delta/base entry is already covered by the
             // overflow-address lookup above. Checked delta rows are before
             // resume. Only an old unterminated base row can still coincide.
-            let present = self.entries[begin..]
-                .iter()
-                .take_while(|entry| entry.hash == key)
-                .any(|entry| {
-                    let pos = location(entry, &self.wide);
-                    pos.file == file && pos.offset == row.offset
-                });
+            let present = self.matching_entries(key).any(|entry| {
+                let pos = location(entry, &self.wide);
+                pos.file == file && pos.offset == row.offset
+            });
             if !present {
                 let entry = self.make_entry(
                     file,
@@ -823,6 +927,22 @@ impl IdLocator {
         }
         Ok(())
     }
+    /// A fresh complete listing can prove membership unchanged without cloning
+    /// generation maps. Tokenless hosts must use the checked-hash refresh path.
+    pub fn matches_listed_stats(&self, listed: &[(String, crate::host::FileStat)]) -> bool {
+        self.files.len() == listed.len()
+            && self.files.iter().zip(listed).all(|(file, (path, stat))| {
+                !file.dirty
+                    && file.path == *path
+                    && file.generation.as_ref().is_some_and(|generation| {
+                        stat.change_id.is_some()
+                            && generation.change_id == stat.change_id
+                            && generation.covered_len == stat.len
+                            && generation.modified_ns == stat.modified_ns
+                    })
+            })
+    }
+
     /// Generation used to prove this path's membership. Callers can check it
     /// around candidate decoding to reject an intervening edit.
     pub fn generation_for(&self, path: &str) -> Option<&SourceGeneration> {
@@ -835,6 +955,12 @@ impl IdLocator {
     pub fn resident_bytes(&self) -> usize {
         std::mem::size_of::<Self>()
             + (self.entries.capacity() + self.delta.capacity()) * std::mem::size_of::<Entry>()
+            + self.runs.capacity() * std::mem::size_of::<Vec<Entry>>()
+            + self
+                .runs
+                .iter()
+                .map(|run| run.capacity() * std::mem::size_of::<Entry>())
+                .sum::<usize>()
             + self.files.capacity() * std::mem::size_of::<File>()
             + self
                 .files
@@ -850,6 +976,101 @@ impl IdLocator {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rejected_saved_tables_do_not_retain_partial_overflow_addresses() {
+        let mut locator = IdLocator::default();
+        let original = locator.make_entry(
+            1,
+            "other-file",
+            RowLocation {
+                partition: 1,
+                offset: u64::from(u32::MAX) + 1,
+                ordinal: 0,
+            },
+        );
+        let next_wide = locator.next_wide;
+        let len = u64::from(u32::MAX) + 3;
+        let mut bytes = Vec::new();
+        for scalar in [2, len, 2, 2, len - 2, 0, 1, len - 1, 1] {
+            super::super::persist::put(&mut bytes, scalar);
+        }
+        for _ in 0..3 {
+            assert!(locator.decode_entries(&bytes, len, 0).is_none());
+            assert_eq!(locator.wide.len(), 1);
+            assert_eq!(location(&original, &locator.wide).file, 1);
+            assert_eq!(locator.next_wide, next_wide);
+        }
+    }
+
+    #[test]
+    fn saved_tables_remain_separate_and_listing_shortcut_checks_every_file() {
+        use crate::fs::FsStorageHost;
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_str().unwrap();
+        let host = FsStorageHost::new_polling(std::time::Duration::from_secs(60)).unwrap();
+        let paths = (0..3)
+            .map(|file| format!("{root}/{file}.jsonl"))
+            .collect::<Vec<_>>();
+        for (file, path) in paths.iter().enumerate() {
+            host.write(path, &format!("{{\"id\":\"{file}\"}}\n"))
+                .unwrap();
+        }
+        let store = super::super::persist::Store::new(root.into(), 1);
+        IdLocator::build(&host, &paths).unwrap().save(&host, &store);
+        let mut locator =
+            IdLocator::build_persisted(&host, &paths, &BTreeMap::new(), None, &store).unwrap();
+        assert_eq!(
+            locator.runs.len(),
+            3,
+            "restore retains sorted per-file runs, not a global sort"
+        );
+        let listed = paths
+            .iter()
+            .map(|path| (path.clone(), host.stat(path).unwrap().unwrap()))
+            .collect::<Vec<_>>();
+        assert!(locator.matches_listed_stats(&listed));
+        assert!(!locator.matches_listed_stats(&listed[..2]));
+        let mut changed = listed.clone();
+        changed[1].1.change_id = Some(changed[1].1.change_id.unwrap().wrapping_add(1));
+        assert!(!locator.matches_listed_stats(&changed));
+        changed = listed.clone();
+        changed[1].1.change_id = None;
+        assert!(!locator.matches_listed_stats(&changed));
+        changed = listed.clone();
+        changed.push((format!("{root}/new.jsonl"), listed[0].1));
+        assert!(!locator.matches_listed_stats(&changed));
+        locator.files[1].dirty = true;
+        assert!(!locator.matches_listed_stats(&listed));
+    }
+
+    #[test]
+    fn zero_hash_and_hash_collisions_still_verify_authoritative_ids() {
+        use crate::memory::MemoryStorageHost;
+        let host = MemoryStorageHost::default();
+        let paths: Vec<String> = vec!["a.jsonl".into(), "b.jsonl".into()];
+        host.write(&paths[0], "{\"id\":\"a\"}\n").unwrap();
+        host.write(&paths[1], "{\"id\":\"b\"}\n").unwrap();
+        for key in [0, 1, u64::MAX] {
+            let mut locator = IdLocator::build(&host, &paths).unwrap();
+            for entry in locator
+                .entries
+                .iter_mut()
+                .chain(locator.runs.iter_mut().flatten())
+            {
+                entry.hash = key;
+            }
+            locator.finish(&host).unwrap();
+            host.write(&paths[1], "{\"id\":\"a\"}\n").unwrap();
+            locator.files[1].generation = SourceGeneration::observe(&host, &paths[1]).unwrap();
+            assert!(locator
+                .finish(&host)
+                .unwrap_err()
+                .to_string()
+                .contains("Duplicate partition record 'a'"));
+            host.write(&paths[1], "{\"id\":\"b\"}\n").unwrap();
+        }
+    }
 
     #[test]
     fn equal_hash_delta_sort_and_merge_use_decoded_source_positions() {
